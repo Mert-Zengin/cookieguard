@@ -12,6 +12,24 @@ used on a machine you care about.
 > machine, never on a corporate network, and never with real accounts or real
 > browser sessions. Handle samples only if local law and your organization allow it.
 
+## Option 0 - No malware at all (start here)
+
+You can validate almost everything without a sample:
+
+```powershell
+./sandbox/prepare.ps1 -Version v1.3.0   # builds a Windows Sandbox kit + .wsb
+# double-click sandbox\CookieGuard.generated.wsb
+```
+
+Inside the sandbox, `run-test.ps1` creates synthetic browser data with
+`tools/fakecookies`, then runs `tools/simulate`, a **benign** program that opens
+and reads the files and holds the handles exactly like a stealer would - but
+never exfiltrates, persists, or modifies anything. Run it a second time with
+`--remote-debugging-port 9222` to trigger the high-severity signal and, with
+`--protect-review`, to see a `terminate` record. Only move on to a real sample if
+you specifically need to confirm behaviour that the simulator cannot reproduce
+(for example injection or a real C2-driven chain).
+
 ## What this test can and cannot show
 
 | Question | Answer |

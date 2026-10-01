@@ -1,14 +1,62 @@
+<div align="center">
+
+<img src="assets/cookieguard.png" width="96" alt="CookieGuard shield logo">
+
 # CookieGuard
 
-**Windows browser-cookie access monitor — development build.**
+**Windows browser-cookie & credential access monitor — defensive security.**
 
-CookieGuard observes processes holding readable handles to browser cookie and
-credential files. It helps investigate unexpected access; **it is not an
-antivirus, an access-control driver, or a guarantee against cookie theft.** It
-shows a notification-area (tray) icon while running, opens a **live window** when
-you double-click the executable, and offers an **opt-in** enforcement mode that
-terminates a process only on high-confidence signals.
-License: [MIT](LICENSE).
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6.svg)](#)
+[![Go](https://img.shields.io/badge/Go-1.26%2B-00ADD8.svg?logo=go&logoColor=white)](go.mod)
+[![Release](https://img.shields.io/github/v/release/Mert-Zengin/cookieguard?sort=semver&label=release)](https://github.com/Mert-Zengin/cookieguard/releases)
+[![Stars](https://img.shields.io/github/stars/Mert-Zengin/cookieguard?style=social)](https://github.com/Mert-Zengin/cookieguard/stargazers)
+
+Observes processes holding readable handles to browser cookies and credential
+stores. **Not an antivirus, not an access-control driver, and not a guarantee
+against cookie theft.** It shows a tray icon, opens a live window on
+double-click, and offers opt-in enforcement.
+
+</div>
+
+> [!WARNING]
+> This is an **observation** tool. Enforcement is off by default, can end a
+> legitimate process, and does not intercept a read that already happened.
+> **Empty output never means "safe".** CookieGuard is not a substitute for
+> Microsoft Defender or your endpoint protection.
+
+## Contents
+
+- [Quick start](#quick-start)
+- [What works](#what-works)
+- [Limits](#limits--read-before-relying-on-this-tool)
+- [Threat signals](#threat-signals-and-sources)
+- [Window (GUI)](#window-gui)
+- [Tray icon](#tray-icon)
+- [Enforcement](#enforcement-opt-in-off-by-default)
+- [Sandbox testing without malware](#sandbox-testing-without-malware)
+- [Icons, builds, and code signing](#icons-builds-and-code-signing)
+- [Tests](#tests)
+- [Türkçe](#türkçe)
+
+## Quick start
+
+Download the latest [release](https://github.com/Mert-Zengin/cookieguard/releases)
+(`cookieguard.exe` + `cookieguard-tray.exe`) or build it yourself:
+
+```powershell
+./build.ps1 -Version v1.3.1
+```
+
+| I want to… | Command |
+|---|---|
+| Open a live window + tray icon | double-click `cookieguard-tray.exe` (or `.\cookieguard.exe gui`) |
+| Run quietly in the tray | `.\cookieguard-tray.exe run --lang en` |
+| One-shot scan (JSON on stdout) | `.\cookieguard.exe scan --lang en` |
+| Print the documented threat catalog | `.\cookieguard.exe threats` |
+| Add to login startup | `.\cookieguard.exe install` |
+| Turn on enforcement (opt-in) | add `--protect` (high only) or `--protect-review` |
+| Test safely without malware | `./sandbox/prepare.ps1` (see [Sandbox testing](#sandbox-testing-without-malware)) |
 
 ## What works
 
@@ -55,8 +103,9 @@ License: [MIT](LICENSE).
 | Zero false positives, <1% CPU, <5 MiB RAM | Not guaranteed; measure on your machine |
 
 An observation is **not proof of malware**. Antivirus, backup, migration, and
-other legitimate software may access these files. CookieGuard does not kill
-processes, change cookie permissions, or modify security policies automatically.
+other legitimate software may access these files. By default CookieGuard does
+not kill processes or change cookie permissions or security policies;
+enforcement only happens if you explicitly enable `--protect`/`--protect-review`.
 
 Expected browser access is hidden by default. Use `--include-browsers` to see it.
 A valid signature and familiar path are heuristics, not attestation of running
@@ -150,6 +199,35 @@ A false positive can close a legitimate tool (for example a backup or migration
 utility). Use it only if you accept that risk. Terminating another user's or a
 protected process requires administrator rights.
 
+## Sandbox testing without malware
+
+You do **not** need a real malware sample to validate CookieGuard. Two built-in
+tools reproduce stealer-like behaviour on synthetic files only:
+
+```powershell
+# 1) Build the Windows Sandbox test kit and generate a .wsb config
+./sandbox/prepare.ps1 -Version v1.3.1
+# 2) Double-click sandbox\CookieGuard.generated.wsb
+```
+
+Inside the sandbox, `run-test.ps1` creates fake browser data, starts CookieGuard,
+and runs the benign simulator in observation mode and then with `--protect-review`.
+Alternatively, on any isolated VM:
+
+```powershell
+go run ./tools/fakecookies -profile $env:USERPROFILE      # synthetic cookies + Local State
+go run ./tools/simulate   --profile $env:USERPROFILE --yes  # opens+reads them, holds handles
+# optional: simulate a debugging-style access (triggers the high signal)
+go run ./tools/simulate   --remote-debugging-port 9222 --hold 20s --yes
+```
+
+`tools/simulate` only opens and reads files you point it at; it never
+exfiltrates, persists, or modifies anything, and refuses to run without `--yes`.
+One caveat observed in live testing: an unsigned process may be reported as
+`unsigned_binary` because offline Authenticode verification can fail for
+legitimate binaries. See [docs/SANDBOX_TESTING.md](docs/SANDBOX_TESTING.md) for
+a real-sample workflow in an isolated VM or Any.Run (never on a real machine).
+
 ## Icons, builds, and code signing
 
 ```powershell
@@ -177,7 +255,7 @@ that as trusted signing.
 ```powershell
 go test ./...
 go vet ./...
-go build -trimpath -ldflags "-X main.version=v1.3.0" -o cookieguard.exe ./cmd/cookieguard
+go build -trimpath -ldflags "-X main.version=v1.3.1" -o cookieguard.exe ./cmd/cookieguard
 .\cookieguard.exe version
 .\cookieguard.exe gui          # opens the window
 .\cookieguard.exe run --lang en
@@ -331,7 +409,7 @@ garantisi verilmez; 64 MiB sınırı yalnızca yerel sorgu tamponu içindir.
 ```powershell
 go test ./...
 go vet ./...
-go build -trimpath -ldflags "-X main.version=v1.3.0" -o cookieguard.exe ./cmd/cookieguard
+go build -trimpath -ldflags "-X main.version=v1.3.1" -o cookieguard.exe ./cmd/cookieguard
 .\cookieguard.exe version
 .\cookieguard.exe gui          # pencereyi açar
 .\cookieguard.exe run --lang tr --notify --log "$env:LOCALAPPDATA\CookieGuard\events.jsonl"
@@ -400,8 +478,21 @@ sonlandırılmaz. Race testi CGO ve uyumlu C derleyicisi gerektirir.
 
 **Gerçek** bir örnekle doğrulama için [docs/SANDBOX_TESTING.md](docs/SANDBOX_TESTING.md)
 belgesine bakın: izole VM veya etkileşimli Any.Run, geçici hesaplar, snapshot ve
-kurumsal ağ olmadan. Gerçek bir hesaba giriş yapmak istemiyorsanız
-`go run ./tools/fakecookies` ile sahte profil üretebilirsiniz.
+kurumsal ağ olmadan.
+
+Zararlı örnek **gerekmeden** de doğrulayabilirsiniz:
+
+```powershell
+./sandbox/prepare.ps1 -Version v1.3.1     # Windows Sandbox kiti + .wsb üretir
+# sandbox\CookieGuard.generated.wsb dosyasına çift tıklayın
+
+go run ./tools/fakecookies -profile $env:USERPROFILE       # sahte çerez + Local State
+go run ./tools/simulate   --profile $env:USERPROFILE --yes # aç+oku, handle tut
+go run ./tools/simulate   --remote-debugging-port 9222 --hold 20s --yes  # yüksek sinyal
+```
+
+`tools/simulate` yalnızca işaret ettiğiniz dosyaları açar/okur; ağa veri göndermez,
+kalıcılık veya değişiklik yapmaz ve `--yes` olmadan çalışmaz.
 
 Windows, tarayıcı, Defender/uç nokta koruması ve SmartScreen'i güncel ve açık
 tutun. Bilinmeyen indirme/eklentilerden kaçının; günlük işlerde standart hesap

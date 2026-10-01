@@ -1,5 +1,28 @@
 # Changelog / Değişiklikler
 
+## v1.3.1 (2026-10-01)
+
+### English
+- Added a Windows Sandbox test kit (`sandbox/prepare.ps1` + `run-test.ps1`) that
+  builds a mapped-folder `.wsb`, creates synthetic browser data, and runs the
+  observation and enforcement demos.
+- Added `tools/simulate`, a benign stealer-behaviour simulator (opens/reads
+  synthetic files, holds handles, optional `--remote-debugging-port`), plus
+  `tools/fakecookies` improvements.
+- Deduplicated enforcement so a process is terminated once per run, removing
+  spurious "parameter is incorrect" errors on repeated observations.
+- Added a PNG logo and badges; polished the README for GitHub.
+
+### Türkçe
+- Windows Sandbox test kiti eklendi (`sandbox/prepare.ps1` + `run-test.ps1`):
+  eşlenmiş klasörlü `.wsb` üretir, sahte tarayıcı verisi oluşturur ve gözlem ile
+  engelleme demolarını çalıştırır.
+- `tools/simulate` eklendi: zararsız stealer davranışı simülatörü (sahte dosyaları
+  açar/okur, handle tutar, isteğe bağlı `--remote-debugging-port`).
+- Engelleme tekilleştirildi: bir süreç çalıştırma başına bir kez sonlandırılır;
+  tekrar eden gözlemlerdeki hatalı "parametre" kayıtları kaldırıldı.
+- PNG logo ve rozetler eklendi; README GitHub için düzenlendi.
+
 ## v1.3.0 (2026-10-01)
 
 ### English

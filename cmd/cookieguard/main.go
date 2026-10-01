@@ -233,6 +233,7 @@ func run(args []string, out, diagnostics io.Writer) error {
 	}
 	fmt.Fprintf(diagnostics, "%s: %d; Ctrl+C\n", message("İzlenen dosyalar", "Observed files"), len(paths))
 	lastStatus := ""
+	killed := make(map[int]bool)
 	w := watcher.Watcher{
 		Interval: *interval, Discover: discover, IncludeBrowsers: *includeBrowsers,
 		Status: func(r handle.Report) {
@@ -255,9 +256,10 @@ func run(args []string, out, diagnostics io.Writer) error {
 			if alerts != nil && e.Kind == "review_access" {
 				alerts.Show("CookieGuard", fmt.Sprintf("%s\n%s\nPID=%d\nEXE=%s\nFILE=%s", message("İncelenmesi gereken dosya erişimi. Saldırı kanıtı değildir.", "File access to review. This is not proof of an attack."), signalSummary(e), e.Process.PID, e.Process.Path, e.File))
 			}
-			if protectOn.Load() || protectReviewOn.Load() {
+			if (protectOn.Load() || protectReviewOn.Load()) && !killed[e.Process.PID] {
 				decision := enforce.Decide(e.Process.PID, e.Process.Name, e.Level, e.Signals, true, protectReviewOn.Load())
 				if decision.Terminate {
+					killed[e.Process.PID] = true
 					killErr := proc.Kill(uint32(e.Process.PID))
 					record := action{
 						Time: time.Now().UTC(), Kind: "terminate", PID: e.Process.PID,

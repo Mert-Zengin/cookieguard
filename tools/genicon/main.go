@@ -63,7 +63,16 @@ func main() {
 	if err := os.WriteFile(target, out.Bytes(), 0o644); err != nil {
 		panic(err)
 	}
-	fmt.Printf("wrote %s (%d bytes, %d sizes)\n", target, out.Len(), len(entries))
+	// A PNG copy for documentation (GitHub cannot render ICO in Markdown).
+	pngTarget := filepath.Join("assets", "cookieguard.png")
+	var pngBuf bytes.Buffer
+	if err := png.Encode(&pngBuf, img); err != nil {
+		panic(err)
+	}
+	if err := os.WriteFile(pngTarget, pngBuf.Bytes(), 0o644); err != nil {
+		panic(err)
+	}
+	fmt.Printf("wrote %s (%d bytes, %d sizes) and %s\n", target, out.Len(), len(entries), pngTarget)
 }
 
 func render(n int) *image.NRGBA {
