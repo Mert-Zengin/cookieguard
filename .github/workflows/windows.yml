@@ -1,0 +1,26 @@
+name: Windows checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Unit and synthetic native integration tests
+        run: go test -v ./...
+      - name: Static checks
+        run: go vet ./...
+      - name: Build development executable
+        run: go build -trimpath -ldflags "-X main.version=v1.2-dev" -o cookieguard.exe ./cmd/cookieguard
+      - name: Build metadata smoke test
+        run: .\cookieguard.exe version

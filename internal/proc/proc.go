@@ -1,0 +1,119 @@
+// Package proc wraps the Windows process APIs CookieGuard needs.
+package proc
+
+import (
+	"errors"
+	"strings"
+	"unsafe"
+
+	"golang.org/x/sys/windows"
+)
+
+// Process is a lightweight entry from a process snapshot.
+type Process struct {
+	PID  uint32
+	PPID uint32
+	Name string // lower-case executable name, e.g. "chrome.exe"
+}
+
+// Snapshot returns all running processes.
+func Snapshot() ([]Process, error) {
+	h, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer windows.CloseHandle(h)
+
+	var out []Process
+	var e windows.ProcessEntry32
+	e.Size = uint32(unsafe.Sizeof(e))
+	for err = windows.Process32First(h, &e); err == nil; err = windows.Process32Next(h, &e) {
+		out = append(out, Process{
+			PID:  e.ProcessID,
+			PPID: e.ParentProcessID,
+			Name: strings.ToLower(windows.UTF16ToString(e.ExeFile[:])),
+		})
+	}
+	if !errors.Is(err, windows.ERROR_NO_MORE_FILES) {
+		return out, err
+	}
+	return out, nil
+}
+
+// ImagePath returns the full executable path of a process.
+func ImagePath(pid uint32) (string, error) {
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	if err != nil {
+		return "", err
+	}
+	defer windows.CloseHandle(h)
+
+	buf := make([]uint16, windows.MAX_LONG_PATH)
+	n := uint32(len(buf))
+	if err := windows.QueryFullProcessImageName(h, 0, &buf[0], &n); err != nil {
+		return "", err
+	}
+	return windows.UTF16ToString(buf[:n]), nil
+}
+
+// CommandLine returns the command line of a process (Windows 8.1+).
+func CommandLine(pid uint32) (string, error) {
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	if err != nil {
+		return "", err
+	}
+	defer windows.CloseHandle(h)
+
+	buf := make([]byte, 2048)
+	for range 4 {
+		var size uint32
+		err = windows.NtQueryInformationProcess(h, windows.ProcessCommandLineInformation,
+			unsafe.Pointer(&buf[0]), uint32(len(buf)), &size)
+		if err == nil {
+			us := (*windows.NTUnicodeString)(unsafe.Pointer(&buf[0]))
+			return us.String(), nil
+		}
+		if !isBufferError(err) || int(size) <= len(buf) {
+			return "", err
+		}
+		buf = make([]byte, size)
+	}
+	return "", err
+}
+
+func isBufferError(err error) bool {
+	return errors.Is(err, windows.STATUS_INFO_LENGTH_MISMATCH) ||
+		errors.Is(err, windows.STATUS_BUFFER_TOO_SMALL) ||
+		errors.Is(err, windows.STATUS_BUFFER_OVERFLOW)
+}
+
+// StartTime returns the process creation time (100ns ticks). Combined with
+// the PID it uniquely identifies a process even when PIDs are reused.
+func StartTime(pid uint32) (int64, error) {
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	if err != nil {
+		return 0, err
+	}
+	defer windows.CloseHandle(h)
+
+	var c, e, k, u windows.Filetime
+	if err := windows.GetProcessTimes(h, &c, &e, &k, &u); err != nil {
+		return 0, err
+	}
+	return c.Nanoseconds(), nil
+}
+
+// Kill terminates a process.
+func Kill(pid uint32) error {
+	h, err := windows.OpenProcess(windows.PROCESS_TERMINATE, false, pid)
+	if err != nil {
+		return err
+	}
+	defer windows.CloseHandle(h)
+	return windows.TerminateProcess(h, 1)
+}
+
+// IsElevated reports whether the current process runs with admin rights.
+func IsElevated() bool {
+	return windows.GetCurrentProcessToken().IsElevated()
+}

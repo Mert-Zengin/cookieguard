@@ -1,169 +1,249 @@
+// Package handle observes open Windows handles without reading file contents.
 package handle
 
 import (
+	"encoding/binary"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
-	"syscall"
+	"time"
 	"unsafe"
 
 	"github.com/cookieguard/internal/risk"
-	"github.com/cookieguard/internal/browser"
-
 	"golang.org/x/sys/windows"
 )
 
-// SYSTEM_HANDLE_INFORMATION_EX is the structure used for NtQuerySystemInformation
-// with SystemExtendedHandleInformation
-// https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdm/ns-wdm-_system_handle_information_ex
-// We use this to enumerate all handles in the system.
-type SYSTEM_HANDLE_INFORMATION_EX struct {
-	ProcessID      uint32
-	Handle         uint32
-	ObjectTypeIndex  uint32
-	HandleAttributes uint32
-	GrantedAccess    uint32
-	ObjectName     *uint16
-	ObjectNameLength uint32
+const maxBuffer = 64 << 20
+
+type entry struct {
+	pid, value uintptr
+	access     uint32
+	typeIndex  uint16
 }
 
-// Scan finds processes accessing a file
-func Scan(filePath string) ([]risk.ProcessInfo, error) {
-	// Get kernel path of the file (to match system handle paths)
-	kernelPath, err := getKernelPath(filePath)
-	if err != nil {
-		return nil, err
-	}
+type FileID struct{ Volume, High, Low uint32 }
 
-	// Query all system handles
-	handles, err := querySystemHandles()
-	if err != nil {
-		return nil, err
-	}
+// Observation proves only that a process held a readable handle at scan time.
+// It does not prove that the process read the file or that it is malicious.
+type Observation struct {
+	Process risk.ProcessInfo `json:"process"`
+	File    string           `json:"file"`
+	Access  uint32           `json:"access"`
+}
 
-	var processes []risk.ProcessInfo
-	for _, h := range handles {
-		if h.ObjectName == nil || h.ObjectNameLength == 0 {
+type Report struct {
+	DurationMS            int64         `json:"duration_ms"`
+	TargetsRequested      int           `json:"targets_requested"`
+	TargetsAvailable      int           `json:"targets_available"`
+	Observations          []Observation `json:"observations"`
+	Handles               int           `json:"handles"`
+	Checked               int           `json:"checked"`
+	InaccessibleProcesses int           `json:"inaccessible_processes"`
+	UnresolvedHandles     int           `json:"unresolved_handles"`
+	UnavailableTargets    []string      `json:"unavailable_targets,omitempty"`
+}
+
+// Scanner reuses its query buffer. Use it from only one goroutine.
+type Scanner struct{ buf []byte }
+
+func fileID(h windows.Handle) (FileID, error) {
+	var info windows.ByHandleFileInformation
+	if err := windows.GetFileInformationByHandle(h, &info); err != nil {
+		return FileID{}, err
+	}
+	if info.FileIndexHigh == 0 && info.FileIndexLow == 0 {
+		return FileID{}, errors.New("filesystem does not provide a usable file identity")
+	}
+	return FileID{info.VolumeSerialNumber, info.FileIndexHigh, info.FileIndexLow}, nil
+}
+
+func parseTable(buf []byte, pointerSize int) ([]entry, error) {
+	if pointerSize != 4 && pointerSize != 8 {
+		return nil, errors.New("unsupported pointer size")
+	}
+	header, stride := 2*pointerSize, 3*pointerSize+16
+	if len(buf) < header {
+		return nil, errors.New("truncated handle table header")
+	}
+	readPtr := func(b []byte) uintptr {
+		if pointerSize == 8 {
+			return uintptr(binary.LittleEndian.Uint64(b))
+		}
+		return uintptr(binary.LittleEndian.Uint32(b))
+	}
+	count := readPtr(buf)
+	if count > uintptr((len(buf)-header)/stride) {
+		return nil, errors.New("truncated handle table entries")
+	}
+	out := make([]entry, int(count))
+	for i := range out {
+		b := buf[header+i*stride : header+(i+1)*stride]
+		out[i] = entry{pid: readPtr(b[pointerSize:]), value: readPtr(b[2*pointerSize:]),
+			access:    binary.LittleEndian.Uint32(b[3*pointerSize:]),
+			typeIndex: binary.LittleEndian.Uint16(b[3*pointerSize+6:])}
+	}
+	return out, nil
+}
+
+func (s *Scanner) table() ([]entry, error) {
+	if len(s.buf) == 0 {
+		s.buf = make([]byte, 1<<20)
+	}
+	for range 10 {
+		var needed uint32
+		err := windows.NtQuerySystemInformation(windows.SystemExtendedHandleInformation,
+			unsafe.Pointer(&s.buf[0]), uint32(len(s.buf)), &needed)
+		if err == nil {
+			if needed == 0 || int(needed) > len(s.buf) {
+				return nil, errors.New("invalid handle table size")
+			}
+			return parseTable(s.buf[:needed], int(unsafe.Sizeof(uintptr(0))))
+		}
+		if !errors.Is(err, windows.STATUS_INFO_LENGTH_MISMATCH) && !errors.Is(err, windows.STATUS_BUFFER_TOO_SMALL) {
+			return nil, err
+		}
+		size := max(len(s.buf)*2, int(needed)+65536)
+		if size > maxBuffer {
+			return nil, errors.New("handle table exceeds 64 MiB safety limit")
+		}
+		s.buf = make([]byte, size)
+	}
+	return nil, errors.New("handle table changed too quickly; retry next scan")
+}
+
+// Scan counts coverage gaps explicitly. No observations is not a clean bill
+// of health. Targets are reopened each time to handle database replacement.
+func (s *Scanner) Scan(paths []string) (report Report, scanErr error) {
+	start := time.Now()
+	defer func() { report.DurationMS = time.Since(start).Milliseconds() }()
+	report.TargetsRequested = len(paths)
+	targets := make(map[FileID]string)
+	var refs []windows.Handle
+	defer func() {
+		for _, h := range refs {
+			windows.CloseHandle(h)
+		}
+	}()
+	for _, path := range paths {
+		p, err := windows.UTF16PtrFromString(path)
+		if err != nil {
+			return report, err
+		}
+		h, err := windows.CreateFile(p, windows.FILE_READ_ATTRIBUTES,
+			windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+			nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
+		if err != nil {
+			report.UnavailableTargets = append(report.UnavailableTargets, path)
 			continue
 		}
-
-		// Convert ObjectName to string
-		objectName := syscall.UTF16ToString((*[1 << 30]uint16)(unsafe.Pointer(h.ObjectName))[:h.ObjectNameLength/2])
-
-		// Check if this handle points to our cookie file
-		if strings.EqualFold(objectName, kernelPath) {
-			// Get process info for this handle
-			proc, err := getProcessInfo(h.ProcessID)
-			if err != nil {
-				continue
+		refs = append(refs, h)
+		id, err := fileID(h)
+		if err != nil {
+			report.UnavailableTargets = append(report.UnavailableTargets, path)
+			continue
+		}
+		targets[id] = path
+	}
+	report.TargetsAvailable = len(targets)
+	if len(targets) == 0 {
+		return report, nil
+	}
+	entries, err := s.table()
+	if err != nil {
+		return report, err
+	}
+	report.Handles = len(entries)
+	ownPID := uintptr(os.Getpid())
+	var fileType uint16
+	for _, e := range entries {
+		if e.pid != ownPID {
+			continue
+		}
+		for _, h := range refs {
+			if e.value == uintptr(h) {
+				fileType = e.typeIndex
+				break
 			}
-
-			// Mark as browser if process name matches
-			proc.IsBrowser = browser.IsBrowserProcess(proc.Name)
-
-			processes = append(processes, proc)
+		}
+		if fileType != 0 {
+			break
 		}
 	}
-
-	return processes, nil
-}
-
-// getKernelPath returns the canonical kernel path for a file
-func getKernelPath(filePath string) (string, error) {
-	// Open the file to get its kernel path
-	handle, err := windows.CreateFile(
-		windows.StringToUTF16Ptr(filePath),
-		windows.GENERIC_READ,
-		windows.FILE_SHARE_READ | windows.FILE_SHARE_WRITE | windows.FILE_SHARE_DELETE,
-		nil,
-		windows.OPEN_EXISTING,
-		0,
-		0,
-	)
-	if err != nil {
-		return "", err
+	if fileType == 0 {
+		return report, errors.New("could not identify Windows file handle type")
 	}
-	defer windows.CloseHandle(handle)
-
-	// Get the file's volume path
-	var volumeName [256]uint16
-	if err := windows.GetVolumePathName(windows.StringToUTF16Ptr(filePath), &volumeName[0], uint32(len(volumeName))); err != nil {
-		return "", err
+	opened := make(map[uintptr]windows.Handle)
+	defer func() {
+		for _, h := range opened {
+			if h != 0 {
+				windows.CloseHandle(h)
+			}
+		}
+	}()
+	seen := make(map[string]bool)
+	current := windows.CurrentProcess()
+	for _, e := range entries {
+		if e.pid == ownPID || e.pid <= 4 || e.pid > 0xffffffff || e.typeIndex != fileType || e.access&windows.FILE_READ_DATA == 0 {
+			continue
+		}
+		ph, ok := opened[e.pid]
+		if !ok {
+			ph, err = windows.OpenProcess(windows.PROCESS_DUP_HANDLE|windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(e.pid))
+			if err != nil {
+				ph = 0
+				report.InaccessibleProcesses++
+			}
+			opened[e.pid] = ph
+		}
+		if ph == 0 {
+			continue
+		}
+		var duplicate windows.Handle
+		// Never close or alter the source process's handle.
+		if err := windows.DuplicateHandle(ph, windows.Handle(e.value), current, &duplicate, 0, false, windows.DUPLICATE_SAME_ACCESS); err != nil {
+			report.UnresolvedHandles++
+			continue
+		}
+		kind, typeErr := windows.GetFileType(duplicate)
+		var id FileID
+		var idErr error
+		if typeErr == nil && kind == windows.FILE_TYPE_DISK {
+			id, idErr = fileID(duplicate)
+			report.Checked++
+		}
+		windows.CloseHandle(duplicate)
+		if typeErr != nil || idErr != nil {
+			report.UnresolvedHandles++
+			continue
+		}
+		if kind != windows.FILE_TYPE_DISK {
+			continue
+		}
+		path, match := targets[id]
+		if !match {
+			continue
+		}
+		key := fmt.Sprintf("%d:%s", e.pid, path)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		var image [32768]uint16
+		n := uint32(len(image))
+		imagePath := ""
+		if windows.QueryFullProcessImageName(ph, 0, &image[0], &n) == nil {
+			imagePath = windows.UTF16ToString(image[:n])
+		}
+		var c, exit, k, u windows.Filetime
+		var start int64
+		if windows.GetProcessTimes(ph, &c, &exit, &k, &u) == nil {
+			start = c.Nanoseconds()
+		}
+		report.Observations = append(report.Observations, Observation{
+			Process: risk.ProcessInfo{PID: int(e.pid), Name: filepath.Base(imagePath), Path: imagePath, StartTime: start},
+			File:    path, Access: e.access,
+		})
 	}
-	volumePath := windows.UTF16ToString(volumeName[:])
-
-	// Get the full path from the handle
-	var finalPath [256]uint16
-	if _, err := windows.GetFinalPathNameByHandle(handle, &finalPath[0], uint32(len(finalPath)), windows.FILE_NAME_NORMALIZED); err != nil {
-		return "", err
-	}
-
-	// Convert to UTF16 string
-	return windows.UTF16ToString(finalPath[:]), nil
-}
-
-// querySystemHandles queries all system handles
-func querySystemHandles() ([]SYSTEM_HANDLE_INFORMATION_EX, error) {
-	var ( 
-		buf []byte
-		size uint32
-	)
-
-	// First call to get required buffer size
-	err := windows.NtQuerySystemInformation(
-		windows.SystemExtendedHandleInformation,
-		nil,
-		0,
-		&size,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	// Allocate buffer
-	buf = make([]byte, size)
-	err = windows.NtQuerySystemInformation(
-		windows.SystemExtendedHandleInformation,
-		&buf[0],
-		size,
-		&size,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	// Parse the buffer
-	var handles []SYSTEM_HANDLE_INFORMATION_EX
-	ptr := (*[1 << 30]byte)(unsafe.Pointer(&buf[0]))
-	for i := 0; i < int(size); i += 24 { // 24 = size of SYSTEM_HANDLE_INFORMATION_EX
-		h := (*SYSTEM_HANDLE_INFORMATION_EX)(unsafe.Pointer(&ptr[i]))
-		handles = append(handles, *h)
-	}
-
-	return handles, nil
-}
-
-// getProcessInfo retrieves process name and path
-func getProcessInfo(pid uint32) (risk.ProcessInfo, error) {
-	// Open process with required access
-	h, err := windows.OpenProcess(windows.PROCESS_QUERY_INFORMATION|windows.PROCESS_VM_READ, false, pid)
-	if err != nil {
-		return risk.ProcessInfo{}, err
-	}
-	defer windows.CloseHandle(h)
-
-	// Get process path
-	var path [256]uint16
-	if _, err := windows.GetModuleFileNameEx(h, 0, &path[0], uint32(len(path))); err != nil {
-		return risk.ProcessInfo{}, err
-	}
-
-	// Get process name (without path)
-	name := strings.ToLower(filepath.Base(windows.UTF16ToString(path[:])))
-
-	return risk.ProcessInfo{
-		PID: int(pid),
-		Name: name,
-		Path: windows.UTF16ToString(path[:]),
-	}, nil
+	return report, nil
 }

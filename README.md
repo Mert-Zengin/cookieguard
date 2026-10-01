@@ -1,128 +1,230 @@
 # CookieGuard
 
-🛡️ **A lightweight, open-source browser cookie protection system for Windows**
+**Windows browser-cookie access monitor — development build.**
 
-## 🌐 Why CookieGuard?
+CookieGuard observes processes holding readable handles to browser cookie files.
+It helps investigate unexpected access; **it is not an antivirus, an access-control
+driver, or a guarantee against cookie theft.** No malware-family blocking claim
+has been validated for this build. License: [MIT](LICENSE).
 
-Cookie stealers (Lumma, Rakhni, RedLine, etc.) target browser cookies to hijack authenticated sessions. CookieGuard monitors browser cookie files in real-time and alerts on suspicious process access.
+## What works
 
-> **Important**: This tool is designed for *defensive security* — it *prevents* cookie theft, not enables it.
+- Periodic native Windows handle enumeration (`NtQuerySystemInformation`),
+  rather than filesystem-change notifications that cannot observe reads.
+- File matching by volume and file identity, including hard links. Files are
+  reopened and profiles rediscovered on every scan to handle replacement.
+- Chrome, Edge, Firefox, Brave, Vivaldi, and common Opera cookie locations;
+  Chromium profile directories and Firefox profile suffixes are not hardcoded.
+- Cookie database WAL, SHM, and journal sidecars are included.
+- Exact browser executable names, expected installation layouts, and embedded
+  Authenticode verification before labeling access as expected browser access.
+  Name substrings and `system32` locations do not grant trust.
+- Review alerts, optional Windows dialogs, optional local JSON Lines logs.
+  Repeated observations are deduplicated while continuously visible.
+- Explicit coverage-gap counters and English/Turkish operational messages.
+- Login startup entry using the Windows registry API, not a shell command.
 
-## 🔍 Threat Analysis (2026)
+## Limits — read before relying on this tool
 
-| Stealer | Technique | Bypasses ABE? | Cookie Theft Method | Detection Method |
-|---------|-----------|---------------|---------------------|------------------|
-| **Lumma** | Chrome DevTools Protocol | ✅ Yes | Reads cookies via `Network.getAllCookies` in headless browser | Monitors headless browser processes with active DevTools Protocol connections; blocks non-browser processes accessing chrome.exe |
-| **RedLine** | DPAPI decryption | ❌ No | Decrypts `Local State` + `Cookies` DB | Checks for processes accessing DPAPI-protected files with non-browser signatures; verifies process integrity via Windows API |
-| **Rakhni** | Process injection | ❌ No | Injects into browser process to read memory | Detects code injection via handle scanning; terminates suspicious injectors |
-| **VoidStealer** | Debugger attachment | ✅ Yes | Steals keys from RAM during decryption | Monitors debugger attachment to browser processes; blocks processes with debug privileges |
-| **Epsilon Stealer** | Electron-based infostealer | ✅ Yes | Harvests browser credentials via DevTools Protocol | Detects non-browser Electron processes accessing cookie files; blocks suspicious Electron apps |
-| **Epsilon Stealer** | Electron-based infostealer | ✅ Yes | Harvests browser credentials via DevTools Protocol | Detects non-browser Electron processes accessing cookie files; blocks suspicious Electron apps |
+| Capability | Current status |
+|---|---|
+| Observe a readable file handle still open during a scan | Implemented; synthetic Windows integration tests |
+| Prove file contents were read or stolen | Not supported |
+| Intercept or deny a read before it happens | Not supported |
+| Reliably catch short-lived reads between scans | Not supported |
+| Detect browser injection, memory scraping, or remote-debugging abuse | Not implemented |
+| Identify/block Lumma, RedLine, Rakhni, VoidStealer, or Epsilon | Not validated |
+| Zero false positives, <1% CPU, <5 MiB RAM | Not guaranteed; measure on your machine |
 
-> 🔒 **ABE (App-Bound Encryption)**: Modern browsers (Chrome 127+) use ABE to protect cookies. Stealers bypass it via: 1) Browser debugging, 2) Memory scanning, 3) DPAPI decryption.
+An observation is **not proof of malware**. Antivirus, backup, migration, and
+other legitimate software may access these files. CookieGuard does not kill
+processes, change cookie permissions, or modify security policies automatically.
 
-## ✨ Key Features
+Expected browser access is hidden by default. Use `--include-browsers` to see it.
+A valid signature and familiar path are heuristics, not attestation of running
+code or verification of a particular publisher. Offline verification may fail
+for legitimate binaries (for example catalog-only signatures or unavailable
+trust data); these accesses remain visible for review. Injected code can still
+operate inside a signed browser.
 
-- **Real-time monitoring** of Chrome, Edge, Firefox cookie files
-- **Process risk scoring** (allowlist browsers, flag suspicious processes)
-- **Optional process termination** (with admin rights)
-- **Minimal resource usage** (CPU < 1%, memory < 5MB)
-- **No false positives** for browser processes
-- **Open-source** (MIT License)
+Run with administrator rights for broader coverage, but protected processes,
+other users, exited processes, and failed handle resolutions can remain outside
+coverage. **Empty observations never mean the machine is safe.** Scanning uses
+undocumented native table layouts and needs testing on each supported Windows
+version. File metadata queries can be delayed by storage/network drivers;
+cancellation takes effect between scans, not during a blocked native query.
+The interval is a delay *after* each scan, not a guaranteed detection latency.
 
-## 🛠️ Installation
+The system handle buffer is reused and capped at 64 MiB; parsing and Go runtime
+memory are additional. CPU and memory depend on system handle counts. Smaller
+intervals increase work and still cannot guarantee prevention.
 
-### 1. Build from Source
-```bash
-# Install Go (if not installed)
-winget install Go
+## Build and use (Windows, Go 1.26.0+)
 
-# Clone and build
-git clone https://github.com/Mert-Zengin/cookieguard.git
-cd cookieguard
-go build -o cookieguard cmd/cookieguard/main.go
+```powershell
+go test ./...
+go vet ./...
+go build -trimpath -ldflags "-X main.version=v1.2-dev" -o cookieguard.exe ./cmd/cookieguard
+.\cookieguard.exe version
+.\cookieguard.exe run --lang en
 ```
 
-### 2. Install as Startup (Auto-Start on Login)
-```bash
-cookieguard install
+| Command / option | Meaning |
+|---|---|
+| `run` (or no command) | Observe the current user's discovered cookie files |
+| `scan` | Single scan; report and coverage counters as JSON on stdout |
+| `version` | Print embedded build version |
+| `install` / `uninstall` | Add/remove this EXE's current-user login startup entry |
+| `--lang tr` / `--lang en` | Operational message language (default: Turkish) |
+| `--interval 5s` | Delay between scans (default: 5s, minimum: 100ms) |
+| `--profile "C:\Users\Example"` | Select another Windows user profile |
+| `--file "C:\path\synthetic-file"` | Observe one explicitly selected file |
+| `--include-browsers` | Also emit expected browser observations |
+| `--json` | Run-mode events as JSON Lines |
+| `--log "C:\path\events.jsonl"` | Append run-mode events to a local log |
+| `--notify` | Show review dialogs; at most one open, rate-limited to 30s |
+| `--help` | List flags |
+
+Example:
+
+```powershell
+.\cookieguard.exe run --lang en --json --notify --log "$env:LOCALAPPDATA\CookieGuard\events.jsonl"
+.\cookieguard.exe scan --lang en
+.\cookieguard.exe install
+# To stop running: Ctrl+C. Removing startup does not stop an existing process.
+.\cookieguard.exe uninstall
 ```
 
-### 3. Run
-```bash
-cookieguard
+Installing is optional and is **not** done by the build or tests. Keep the EXE at
+the same location after installation. Startup runs in observation mode with
+dialogs and a log at `%LOCALAPPDATA%\CookieGuard\events.jsonl`; it does not request
+elevation or install a service. Logs append without automatic rotation; monitor
+disk usage. Uninstall removes only the startup entry and preserves logs.
+
+Diagnostics go to stderr, leaving JSON stdout machine-readable. Logs include
+process paths, file paths (possibly usernames), PID, start time, access rights,
+event time and event kind. Cookie contents are never read, decrypted, logged,
+or transmitted. CookieGuard has no telemetry. Logs are not tamper-resistant.
+
+## Tests
+
+```powershell
+go test -v ./...
+go vet ./...
+go test ./internal/handle -run '^$' -fuzz FuzzParseTable -fuzztime 10s -parallel 1
+# Optional: requires CGO and a compatible C compiler on Windows.
+go test -race ./...
+Get-FileHash .\cookieguard.exe -Algorithm SHA256
 ```
 
-## 📝 Usage
+Integration tests open **synthetic temporary files** in a child test process;
+they do not read real browser cookies, run malware, install startup entries, or
+terminate user processes. They verify native readable-handle detection, hard
+link identity, write-only exclusion, and missing-target coverage. Unit tests
+cover 32/64-bit table layouts, malformed buffers, browser lookalikes, profile
+discovery, unsigned lookalikes, deduplication, cancellation, and CLI output.
+Local live testing was on Windows 10 amd64 without elevation; other Windows
+versions and elevated coverage require additional validation.
 
-| Command | Description |
-|---------|-------------|
-| `cookieguard` | Start monitoring (default) |
-| `cookieguard install` | Add to startup (HKCU\Run) |
-| `cookieguard uninstall` | Remove from startup |
-| `cookieguard scan` | Scan for active cookie access |
-| `cookieguard --help` | Show help |
+## Keep sessions safer
 
-## 🌐 Turkish (Türkçe) Documentation
-
-### Neden CookieGuard?
-
-Cookie stealers (Lumma, Rakhni, RedLine gibi) tarayıcı çerezlerini hırsızlık amaçlı hedef alır. CookieGuard tarayıcı çerez dosyalarını gerçek zamanlı takip eder ve şüpheli erişimleri uyarır.
-
-> **Önemli**: Bu araç *savunma amacıyla* geliştirilmiştir — çerez hırsızlığına izin vermez.
-
-### Temel Özellikler
-
-- Chrome, Edge, Firefox çerez dosyalarını gerçek zamanlı takip eder
-- Süreç risk puanlaması (tarayıcıları izin verir, şüpheli süreçleri işaretler)
-- İsteğe bağlı süreç sonlandırma (yönetici hakları ile)
-- Minimum kaynak kullanımı (CPU < 1%, bellek < 5MB)
-- Çerez hırsızlığına karşı %100 koruma
-
-### Tehdit Analizi (2026)
-
-| Çalıcı | Teknik | ABE'yi Atlatır mı? | Çerez Çalma Yöntemi | Tespit Yöntemi |
-|--------|--------|--------------------|---------------------|----------------|
-| **Lumma** | Chrome DevTools Protocol | ✅ Evet | Headless tarayıcıda `Network.getAllCookies` ile çerezleri okur | Aktif DevTools Protocol bağlantıları olan headless tarayıcı süreçlerini izler; chrome.exe'ye erişen tarayıcı olmayan süreçleri engeller |
-| **RedLine** | DPAPI şifre çözme | ❌ Hayır | `Local State` + `Cookies` veritabanını şifresini çözer | Tarayıcı olmayan imzalarla DPAPI korumalı dosyalara erişen süreçleri kontrol eder; süreç bütünlüğünü Windows API ile doğrular |
-| **Rakhni** | Süreç enjeksiyonu | ❌ Hayır | Tarayıcı sürecine enjekte olarak bellekten okuma yapar | Tarayıcı süreçlerine kod enjeksiyonunu izler; modül imzalarını doğrular |
-| **VoidStealer** | Bellek tarama | ✅ Evet | Tarayıcı bellek bölgelerini doğrudan okur | NtQuerySystemInformation ile bellek tarama girişimlerini tarar; yetkisiz bellek erişimini engeller |
-
-### Kurulum
-
-```bash
-cookieguard install
-cookieguard
-```
-
-## 🔬 Testing
-
-### Test 1: Simulate Stealer Activity
-```bash
-# Create a fake stealer (run in separate terminal)
-$ echo "Fake stealer accessing cookies" > C:\\Temp\\stealer.log
-
-# Start CookieGuard in another terminal
-cookieguard
-
-# Observe alert:
-[ALERT] Suspicious access: stealer.exe (PID: 1234)
-```
-
-### Test 2: Verify Browser Access (Allowed)
-```bash
-# Open Chrome and navigate to example.com
-# CookieGuard should NOT alert
-```
-
-## 📜 License
-
-MIT License — See [LICENSE](LICENSE)
+Keep Windows, browsers, Microsoft Defender/your endpoint protection, and
+SmartScreen updated and enabled. Avoid unknown downloads and untrusted browser
+extensions; use a standard account for daily work. Keep browser encryption
+features enabled. If compromise is suspected, use a clean device to revoke
+sessions and review accounts: changing a password alone may not invalidate a
+stolen session. Do not treat this monitor as a replacement for endpoint defense.
 
 ---
 
-> **Security Note**: This tool **does not** store, log, or transmit any user data. It only monitors local file access and alerts the user.
+## Türkçe
 
-> **Report Issues**: [GitHub Issues](https://github.com/Mert-Zengin/cookieguard/issues)
+**CookieGuard, Windows için tarayıcı çerez dosyası erişim izleyicisidir; geliştirme
+sürümüdür. Antivirüs veya erişim engelleyen sürücü değildir.** Çerez hırsızlığını
+kesin olarak önlediği, belirli zararlı ailelerini engellediği veya sıfır yanlış
+pozitif ürettiği iddia edilmez.
 
-> **Contribute**: Pull requests welcome! (See [CONTRIBUTING.md](CONTRIBUTING.md))
+### Çalışan özellikler
+
+- Windows handle tablosunu periyodik tarar; yalnızca dosya değişikliklerini
+  izlemekle yetinmez. Açık okuma handle'larını gözlemleyebilir.
+- Dosya kimliği ile eşleştirir; hard link erişimleri de eşleşir. Profilleri ve
+  yeniden oluşturulan veritabanlarını her taramada yeniden bulur.
+- Chrome, Edge, Firefox, Brave, Vivaldi ve yaygın Opera çerez konumlarını;
+  veritabanlarının WAL/SHM/journal yan dosyalarını izler.
+- Tam tarayıcı EXE adı, bilinen kurulum konumu ve gömülü dijital imza birlikte
+  kontrol edilir. Adında `chrome` veya yolunda `system32` olması izin sağlamaz.
+- İnceleme uyarısı, isteğe bağlı Windows iletişim kutusu ve yerel JSON kaydı.
+- PID ve başlangıç zamanı dikkate alınarak tekrar eden gözlemler azaltılır.
+- Erişilemeyen işlemler/handle'lar/dosyalar ayrıca raporlanır.
+- Türkçe/İngilizce çalışma mesajları ve isteğe bağlı oturum açılışı kaydı.
+
+### Sınırlar
+
+Bir işlemde okunabilir handle bulunması, dosyanın okunduğunu veya saldırı
+yapıldığını kanıtlamaz. Antivirüs, yedekleme ve profil aktarımı gibi meşru araçlar
+da erişebilir. Sistem otomatik işlem sonlandırmaz, çerez izinlerini veya güvenlik
+politikalarını değiştirmez. **Erişim gerçekleşmeden önce engelleme yapmaz.**
+
+Taramalar arasındaki kısa erişimleri kaçırabilir. Bellek taraması, tarayıcı
+enjeksiyonu ve uzaktan hata ayıklama tespiti henüz uygulanmadı. Lumma, RedLine,
+Rakhni, VoidStealer veya Epsilon için doğrulanmış engelleme testi yoktur.
+
+Beklenen tarayıcı erişimi varsayılan olarak gizlenir; `--include-browsers` ile
+görülebilir. Geçerli imza ve beklenen konum, çalışan kodun güvenli olduğunu veya
+belirli bir yayıncıya ait olduğunu ispatlamaz. Çevrimdışı imza doğrulaması meşru
+dosyalarda başarısız olabilir; bu erişimler incelemeye açık kalır. Tarayıcı içine
+enjekte edilen kod bu yaklaşımla engellenmez.
+
+Yönetici olarak çalıştırmak kapsamı artırabilir; korumalı işlemlere tam erişim
+garanti değildir. **Uyarı olmaması güvenli olduğunuz anlamına gelmez.** Yerel canlı
+testler yönetici olmayan Windows 10 amd64 ortamında yapıldı. Windows sürümleri
+ve yönetici kapsamı için ek doğrulama gerekir. Ağ/depolama sürücüsü sorguları
+gecikebilir; Ctrl+C taramalar arasında işlenir. Aralık, tarama bittikten sonraki
+bekleme süresidir; kesin tespit gecikmesi değildir. CPU <%1 ve RAM <5 MiB
+garantisi verilmez; 64 MiB sınırı yalnızca yerel sorgu tamponu içindir.
+
+### Kurulum ve kullanım
+
+```powershell
+go test ./...
+go vet ./...
+go build -trimpath -ldflags "-X main.version=v1.2-dev" -o cookieguard.exe ./cmd/cookieguard
+.\cookieguard.exe version
+.\cookieguard.exe run --lang tr --notify --log "$env:LOCALAPPDATA\CookieGuard\events.jsonl"
+.\cookieguard.exe scan --lang tr
+```
+
+Go 1.26.0 veya üzeri ve Windows gerekir. `run` izler, `scan` tek tarama JSON
+raporu verir, `version` sürümü gösterir. `--interval 5s` bekleme aralığını,
+`--profile` profil klasörünü, `--file` özel test dosyasını seçer. `--json` olayları
+JSON Lines olarak yazar; `--include-browsers` tarayıcı gözlemlerini de gösterir.
+`--help` seçenekleri listeler. Durdurmak için Ctrl+C kullanın.
+
+İsteğe bağlı `.\cookieguard.exe install` mevcut EXE'yi oturum açılışına ekler;
+EXE'yi sonrasında taşımayın. Yönetici yetkisi veya servis kurmaz. Açılışta Türkçe
+uyarılar ve `%LOCALAPPDATA%\CookieGuard\events.jsonl` kaydı ile çalışır.
+`.\cookieguard.exe uninstall` yalnızca açılış kaydını kaldırır; çalışan işlemi
+durdurmaz ve kayıt dosyalarını silmez. Testler otomatik kurulum yapmaz.
+
+Kayıtlar çerez içeriği değil; EXE/dosya yolu (kullanıcı adı içerebilir), PID,
+başlangıç zamanı, erişim hakları ve olay bilgisi içerir. Çerezler okunmaz,
+çözülmez veya ağa gönderilmez; telemetri yoktur. Kayıtlar otomatik döndürülmez;
+disk kullanımını takip edin. Kayıtlar kurcalamaya dayanıklı değildir.
+
+### Test ve günlük güvenlik
+
+Yukarıdaki test komutları sahte geçici dosyalarla okuma handle'ı tespiti, hard
+link eşleştirmesi, salt yazma ayrımı, hatalı tablo girdileri, sahte tarayıcı adları,
+profil bulma, imzasız dosyalar, tekrar azaltma, iptal ve komut satırı davranışını
+kontrol eder. Gerçek çerez okunmaz, zararlı çalıştırılmaz, kullanıcı işlemi
+sonlandırılmaz. Race testi CGO ve uyumlu C derleyicisi gerektirir.
+
+Windows, tarayıcı, Defender/uç nokta koruması ve SmartScreen'i güncel ve açık
+tutun. Bilinmeyen indirme/eklentilerden kaçının; günlük işlerde standart hesap
+kullanın. Şüpheli durumda temiz cihazdan oturumları iptal edin: parola değiştirmek
+tek başına çalınmış oturumu geçersiz kılmayabilir. Bu izleyici uç nokta korumasının
+yerini almaz.
+
+[Issues](https://github.com/Mert-Zengin/cookieguard/issues) ·
+[Contributing / Katkıda bulunma](CONTRIBUTING.md)

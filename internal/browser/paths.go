@@ -2,53 +2,57 @@ package browser
 
 import (
 	"os"
-	"os/user"
+
 	"path/filepath"
 	"strings"
 )
 
 // FindCookiePaths returns paths to browser cookie files
 func FindCookiePaths(profilePath string) ([]string, error) {
-	paths := []string{}
-
-	// Chrome/Edge
-	chromePaths := []string{
-		filepath.Join(profilePath, "AppData", "Local", "Google", "Chrome", "User Data", "Default", "Network", "Cookies"),
-		filepath.Join(profilePath, "AppData", "Local", "Google", "Chrome", "User Data", "Profile 1", "Network", "Cookies"),
+	var paths []string
+	patterns := []string{
+		`AppData\Local\Google\Chrome\User Data\*\Network\Cookies*`,
+		`AppData\Local\Google\Chrome\User Data\*\Cookies*`,
+		`AppData\Local\Microsoft\Edge\User Data\*\Network\Cookies*`,
+		`AppData\Local\Microsoft\Edge\User Data\*\Cookies*`,
+		`AppData\Local\BraveSoftware\Brave-Browser\User Data\*\Network\Cookies*`,
+		`AppData\Local\Vivaldi\User Data\*\Network\Cookies*`,
+		`AppData\Roaming\Mozilla\Firefox\Profiles\*\cookies.sqlite*`,
+		`AppData\Roaming\Opera Software\Opera Stable\Network\Cookies*`,
+		`AppData\Roaming\Opera Software\Opera GX Stable\Network\Cookies*`,
 	}
-
-	edgePaths := []string{
-		filepath.Join(profilePath, "AppData", "Local", "Microsoft", "Edge", "User Data", "Default", "Network", "Cookies"),
-		filepath.Join(profilePath, "AppData", "Local", "Microsoft", "Edge", "User Data", "Profile 1", "Network", "Cookies"),
-	}
-
-	// Firefox
-	firefoxPath := filepath.Join(profilePath, "AppData", "Roaming", "Mozilla", "Firefox", "Profiles", "*.default", "cookies.sqlite")
-
-	// Add to list if exists
-	for _, path := range chromePaths {
-		if _, err := os.Stat(path); err == nil {
-			paths = append(paths, path)
+	seen := make(map[string]bool)
+	for _, pattern := range patterns {
+		matches, err := filepath.Glob(filepath.Join(profilePath, pattern))
+		if err != nil {
+			return nil, err
+		}
+		for _, path := range matches {
+			name := strings.ToLower(filepath.Base(path))
+			if name != "cookies" && name != "cookies-wal" && name != "cookies-shm" && name != "cookies-journal" &&
+				name != "cookies.sqlite" && name != "cookies.sqlite-wal" && name != "cookies.sqlite-shm" && name != "cookies.sqlite-journal" {
+				continue
+			}
+			info, err := os.Stat(path)
+			if err != nil || !info.Mode().IsRegular() {
+				continue
+			}
+			key := strings.ToLower(path)
+			if !seen[key] {
+				paths = append(paths, path)
+				seen[key] = true
+			}
 		}
 	}
-	for _, path := range edgePaths {
-		if _, err := os.Stat(path); err == nil {
-			paths = append(paths, path)
-		}
-	}
-	if _, err := os.Stat(firefoxPath); err == nil {
-		paths = append(paths, firefoxPath)
-	}
-
 	return paths, nil
 }
 
 // IsBrowserProcess returns true if process is a browser
 func IsBrowserProcess(processName string) bool {
-	lowerName := strings.ToLower(processName)
-	return strings.Contains(lowerName, "chrome") ||
-		strings.Contains(lowerName, "edge") ||
-		strings.Contains(lowerName, "firefox") ||
-		strings.Contains(lowerName, "brave") ||
-		strings.Contains(lowerName, "vivaldi")
+	switch strings.ToLower(processName) {
+	case "chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "vivaldi.exe", "opera.exe":
+		return true
+	default:
+		return false
+	}
 }

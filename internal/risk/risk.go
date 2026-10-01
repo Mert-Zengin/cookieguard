@@ -1,55 +1,69 @@
+// Package risk labels observations; it does not classify malware families.
 package risk
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
-	"time"
+	"unsafe"
 
 	"github.com/cookieguard/internal/browser"
+	"golang.org/x/sys/windows"
 )
 
 type ProcessInfo struct {
-	PID   int
-	Name  string
-	Path  string
-	IsBrowser bool
+	PID       int    `json:"pid"`
+	Name      string `json:"name"`
+	Path      string `json:"path"`
+	StartTime int64  `json:"start_time"`
 }
 
-// IsAllowed returns true if process is allowed to access cookies
-func IsAllowed(p ProcessInfo) bool {
-	// Allow browser processes (Chrome, Edge, Firefox)
-	if p.IsBrowser {
-		return true
+// BrowserLocation requires an exact executable name and installation layout.
+// A substring or a "system32" folder never grants trust.
+func BrowserLocation(path string) bool {
+	if !filepath.IsAbs(path) {
+		return false
 	}
-
-	// Allow known system processes
-	if strings.Contains(strings.ToLower(p.Path), "system32") || 
-		systems.Contains(strings.ToLower(p.Path), "windows\system32") {
-		return true
+	path = strings.ToLower(filepath.Clean(path))
+	if !browser.IsBrowserProcess(filepath.Base(path)) {
+		return false
 	}
-
-	// Allow processes that are allowed by user (e.g., Chrome)
-	if browser.IsBrowserProcess(p.Name) {
-		return true
+	for _, root := range []string{os.Getenv("ProgramFiles"), os.Getenv("ProgramFiles(x86)"), os.Getenv("LOCALAPPDATA")} {
+		if root == "" {
+			continue
+		}
+		for _, rel := range []string{
+			`Google\Chrome\Application\chrome.exe`, `Microsoft\Edge\Application\msedge.exe`,
+			`Mozilla Firefox\firefox.exe`, `BraveSoftware\Brave-Browser\Application\brave.exe`,
+			`Vivaldi\Application\vivaldi.exe`,
+		} {
+			if path == strings.ToLower(filepath.Clean(filepath.Join(root, rel))) {
+				return true
+			}
+		}
 	}
-
-	// Allow processes created within the last 5 minutes (common for legit apps)
-	if p.CreatedAt.Before(time.Now().Add(-5 * time.Minute)) {
-		return true
-	}
-
 	return false
 }
 
-// IsAllowedByUser returns true if user has explicitly allowed the process
-func IsAllowedByUser(p ProcessInfo) bool {
-	// In a real implementation, this would check a user-configured allowlist
-	// For demo, we return false (user must manually allow)
-	return false
+// ValidSignature checks embedded Authenticode trust offline. Catalog-only or
+// unverifiable executables are not silently trusted. A signature does not
+// prove benign behavior; injected browser code is outside this model.
+func ValidSignature(path string) bool {
+	p, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return false
+	}
+	file := windows.WinTrustFileInfo{Size: uint32(unsafe.Sizeof(windows.WinTrustFileInfo{})), FilePath: p}
+	data := windows.WinTrustData{
+		Size: uint32(unsafe.Sizeof(windows.WinTrustData{})), UIChoice: windows.WTD_UI_NONE,
+		UnionChoice: windows.WTD_CHOICE_FILE, StateAction: windows.WTD_STATEACTION_VERIFY,
+		ProvFlags:                       windows.WTD_CACHE_ONLY_URL_RETRIEVAL,
+		FileOrCatalogOrBlobOrSgnrOrCert: unsafe.Pointer(&file),
+	}
+	err = windows.WinVerifyTrustEx(windows.InvalidHWND, &windows.WINTRUST_ACTION_GENERIC_VERIFY_V2, &data)
+	data.StateAction = windows.WTD_STATEACTION_CLOSE
+	windows.WinVerifyTrustEx(windows.InvalidHWND, &windows.WINTRUST_ACTION_GENERIC_VERIFY_V2, &data)
+	return err == nil
 }
 
-// IsSuspicious returns true if process is suspicious
-func IsSuspicious(p ProcessInfo) bool {
-	// Check if process is not a browser and not a system process
-	return !p.IsBrowser && !strings.Contains(strings.ToLower(p.Path), "system32")
-}
+func IsAllowed(p ProcessInfo) bool { return BrowserLocation(p.Path) && ValidSignature(p.Path) }
