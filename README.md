@@ -45,7 +45,7 @@ Download the latest [release](https://github.com/Mert-Zengin/cookieguard/release
 (`cookieguard.exe` + `cookieguard-tray.exe`) or build it yourself:
 
 ```powershell
-./build.ps1 -Version v1.3.1
+./build.ps1 -Version v1.3.2
 ```
 
 | I want to… | Command |
@@ -125,6 +125,22 @@ The interval is a delay *after* each scan, not a guaranteed detection latency.
 The system handle buffer is reused and capped at 64 MiB; parsing and Go runtime
 memory are additional. CPU and memory depend on system handle counts. Smaller
 intervals increase work and still cannot guarantee prevention.
+
+## Troubleshooting
+
+- **I only see my browser reading its own files.** That is normal. A signed
+  browser in its expected layout is hidden by default; run with
+  `--include-browsers` if you want to see it. After v1.3.2, a weak hint such as
+  an unusual parent no longer downgrades an expected browser, so normal
+  self-access stops flooding the log.
+- **A known stealer or the simulator was not detected.** Most likely the file
+  handle was opened and closed between two scans; a one-shot read can always be
+  missed. Lower `--interval` (e.g. `250ms`) and keep the process reading/holding
+  the file longer. True read-time coverage needs an access-audit or minifilter
+  design (see below).
+- **`unsigned_binary` shows for a legitimate program.** Offline Authenticode
+  verification can fail for catalog-only or trust-unavailable binaries; treat it
+  as a review hint, not a verdict.
 
 ## Threat signals and sources
 
@@ -206,7 +222,7 @@ tools reproduce stealer-like behaviour on synthetic files only:
 
 ```powershell
 # 1) Build the Windows Sandbox test kit and generate a .wsb config
-./sandbox/prepare.ps1 -Version v1.3.1
+./sandbox/prepare.ps1 -Version v1.3.2
 # 2) Double-click sandbox\CookieGuard.generated.wsb
 ```
 
@@ -255,7 +271,7 @@ that as trusted signing.
 ```powershell
 go test ./...
 go vet ./...
-go build -trimpath -ldflags "-X main.version=v1.3.1" -o cookieguard.exe ./cmd/cookieguard
+go build -trimpath -ldflags "-X main.version=v1.3.2" -o cookieguard.exe ./cmd/cookieguard
 .\cookieguard.exe version
 .\cookieguard.exe gui          # opens the window
 .\cookieguard.exe run --lang en
@@ -409,7 +425,7 @@ garantisi verilmez; 64 MiB sınırı yalnızca yerel sorgu tamponu içindir.
 ```powershell
 go test ./...
 go vet ./...
-go build -trimpath -ldflags "-X main.version=v1.3.1" -o cookieguard.exe ./cmd/cookieguard
+go build -trimpath -ldflags "-X main.version=v1.3.2" -o cookieguard.exe ./cmd/cookieguard
 .\cookieguard.exe version
 .\cookieguard.exe gui          # pencereyi açar
 .\cookieguard.exe run --lang tr --notify --log "$env:LOCALAPPDATA\CookieGuard\events.jsonl"
@@ -468,6 +484,22 @@ kullanın. İmzalanana kadar SmartScreen ilk çalıştırmada uyarabilir. Kendin
 imzalı sertifika yalnızca onu tanıyan makinelerde uyarıyı susturur; güvenilir imza
 sayılmaz.
 
+### Sorun giderme
+
+- **Sadece tarayıcının kendi dosyalarını okuduğunu görüyorum.** Bu normaldir.
+  Beklenen konumdaki imzalı tarayıcı varsayılan olarak gizlenir; görmek için
+  `--include-browsers` kullanın. v1.3.2'den sonra beklenmeyen ebeveyn gibi zayıf
+  bir sinyal, beklenen tarayıcıyı `review`'a düşürmez; böylece normal kendi
+  kendini okuma logu doldurmaz.
+- **Bilinen bir stealer veya simülatör tespit edilmedi.** Büyük olasılıkla dosya
+  handle'ı iki tarama arasında açılıp kapanmıştır; tek seferlik okuma her zaman
+  kaçabilir. `--interval` değerini düşürün (ör. `250ms`) ve süreç dosyayı daha
+  uzun süre açık tutsun. Gerçek okuma-anı kapsaması için erişim denetimi (audit)
+  veya minifilter tasarımı gerekir.
+- **Meşru bir programda `unsigned_binary` görünüyor.** Çevrimdışı Authenticode
+  doğrulaması bazı meşru ikililerde başarısız olabilir; bunu karar değil, inceleme
+  ipucu olarak görün.
+
 ### Test ve günlük güvenlik
 
 Yukarıdaki test komutları sahte geçici dosyalarla okuma handle'ı tespiti, hard
@@ -483,7 +515,7 @@ kurumsal ağ olmadan.
 Zararlı örnek **gerekmeden** de doğrulayabilirsiniz:
 
 ```powershell
-./sandbox/prepare.ps1 -Version v1.3.1     # Windows Sandbox kiti + .wsb üretir
+./sandbox/prepare.ps1 -Version v1.3.2     # Windows Sandbox kiti + .wsb üretir
 # sandbox\CookieGuard.generated.wsb dosyasına çift tıklayın
 
 go run ./tools/fakecookies -profile $env:USERPROFILE       # sahte çerez + Local State

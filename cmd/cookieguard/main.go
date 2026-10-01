@@ -289,7 +289,7 @@ func run(args []string, out, diagnostics io.Writer) error {
 			if e.Level == "high" {
 				label = message("YÜKSEK ÖNCELİK: belgelenmiş bir hırsızlık tekniğiyle uyumlu", "HIGH: matches a documented theft technique")
 			}
-			line := fmt.Sprintf("[%s] %s PID=%d EXE=%q FILE=%q SIGNALS=%s", e.Time.Format(time.RFC3339), label, e.Process.PID, e.Process.Path, e.File, signalSummary(e))
+			line := fmt.Sprintf("[%s] %s LEVEL=%s PID=%d EXE=%q PARENT=%q FILE=%q SIGNALS=%s", e.Time.Format(time.RFC3339), label, e.Level, e.Process.PID, e.Process.Path, e.Process.ParentName, e.File, signalSummary(e))
 			if window != nil {
 				window.Append(line)
 			}

@@ -74,6 +74,25 @@ func TestBrowserLayoutWithUntrustedParentIsReview(t *testing.T) {
 	}
 }
 
+func TestClassifyExpectedBrowserNotDowngraded(t *testing.T) {
+	// A signed browser in its expected layout with only weak review hints must
+	// stay "expected", otherwise normal browser self-access floods the log.
+	weak := []Signal{{ID: "expected_browser", Severity: SeverityInfo}, {ID: "browser_launched_by_untrusted_parent", Severity: SeverityReview}}
+	if got := classify(true, true, weak); got != "expected" {
+		t.Fatalf("expected browser downgraded to %q", got)
+	}
+	high := append(append([]Signal{}, weak...), Signal{ID: "remote_debugging_switch", Severity: SeverityHigh})
+	if got := classify(true, true, high); got != "high" {
+		t.Fatalf("high signal ignored: %q", got)
+	}
+	if got := classify(true, false, weak); got != "review" {
+		t.Fatalf("unsigned lookalike should be review, got %q", got)
+	}
+	if got := classify(false, true, weak); got != "review" {
+		t.Fatalf("non-browser layout should be review, got %q", got)
+	}
+}
+
 func TestCatalogIsCompleteAndSourced(t *testing.T) {
 	catalog := Catalog()
 	if len(catalog) != len(familyOrder) {

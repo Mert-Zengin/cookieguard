@@ -157,15 +157,24 @@ func Assess(p risk.ProcessInfo) Assessment {
 		})
 	}
 
-	assessment := Assessment{Level: "review", Signals: signals}
-	switch {
-	case assessment.Has(SeverityHigh):
-		assessment.Level = "high"
-	case browserLayout && signed && len(signals) == 1:
-		assessment.Level = "expected"
-	}
+	assessment := Assessment{Level: classify(browserLayout, signed, signals), Signals: signals}
 	assessment.Families = associatedFamilies(signals)
 	return assessment
+}
+
+// classify decides the level. A high signal always wins; otherwise a signed
+// browser in its expected layout is expected access, and everything else is
+// review. Weak review hints never downgrade an expected browser.
+func classify(browserLayout, signed bool, signals []Signal) string {
+	for _, s := range signals {
+		if s.Severity == SeverityHigh {
+			return "high"
+		}
+	}
+	if browserLayout && signed {
+		return "expected"
+	}
+	return "review"
 }
 
 func associatedFamilies(signals []Signal) []string {

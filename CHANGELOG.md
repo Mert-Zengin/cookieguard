@@ -1,5 +1,22 @@
 # Changelog / Değişiklikler
 
+## v1.3.2 (2026-10-01)
+
+### English
+- Fixed a false-positive flood: a weak review hint (for example an unusual
+  parent) no longer downgrades a signed browser in its expected layout. Expected
+  browser self-access is hidden by default again; only high signals override it.
+- Event output now includes `LEVEL` and `PARENT` for easier triage.
+- Added a troubleshooting section to the README.
+
+### Türkçe
+- Yanlış-pozitif fırtınası düzeltildi: zayıf bir inceleme ipucu (ör. beklenmeyen
+  ebeveyn) artık beklenen konumdaki imzalı tarayıcıyı `review`'a düşürmez.
+  Beklenen tarayıcı kendi kendini okuma varsayılan olarak yine gizlenir; yalnızca
+  yüksek sinyal bunu geçersiz kılar.
+- Olay çıktısına `LEVEL` ve `PARENT` eklendi.
+- README'ye sorun giderme bölümü eklendi.
+
 ## v1.3.1 (2026-10-01)
 
 ### English
