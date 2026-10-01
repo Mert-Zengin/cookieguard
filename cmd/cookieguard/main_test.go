@@ -12,7 +12,7 @@ import (
 )
 
 func TestCLI(t *testing.T) {
-	for _, args := range [][]string{{"version"}, {"--help"}, {"scan", "--help"}} {
+	for _, args := range [][]string{{"version"}, {"--help"}, {"scan", "--help"}, {"threats"}} {
 		var out, diag bytes.Buffer
 		if err := run(args, &out, &diag); err != nil {
 			t.Fatalf("%v: %v", args, err)
@@ -34,6 +34,45 @@ func TestCLI(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("wrong localized error: %v", err)
 		}
+	}
+}
+
+func TestThreatsCatalog(t *testing.T) {
+	var out, diag bytes.Buffer
+	if err := run([]string{"threats"}, &out, &diag); err != nil {
+		t.Fatal(err)
+	}
+	var catalog struct {
+		Families []struct {
+			Name   string `json:"name"`
+			Source string `json:"source"`
+		} `json:"families"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &catalog); err != nil {
+		t.Fatal(err)
+	}
+	if len(catalog.Families) < 10 {
+		t.Fatalf("catalog too small: %d", len(catalog.Families))
+	}
+	for _, f := range catalog.Families {
+		if f.Name == "" || f.Source == "" {
+			t.Fatalf("family missing name/source: %+v", f)
+		}
+	}
+}
+
+func TestProtectWarnsButStaysOptIn(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "synthetic-file")
+	if err := os.WriteFile(file, []byte("synthetic"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var out, diag bytes.Buffer
+	// A single scan never enforces; --protect must only be accepted for run.
+	if err := run([]string{"scan", "--file", file, "--lang", "en"}, &out, &diag); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(diag.String(), "ENFORCEMENT ON") {
+		t.Fatal("scan surfaced enforcement message")
 	}
 }
 

@@ -2,10 +2,12 @@
 
 **Windows browser-cookie access monitor — development build.**
 
-CookieGuard observes processes holding readable handles to browser cookie files.
-It helps investigate unexpected access; **it is not an antivirus, an access-control
-driver, or a guarantee against cookie theft.** No malware-family blocking claim
-has been validated for this build. License: [MIT](LICENSE).
+CookieGuard observes processes holding readable handles to browser cookie and
+credential files. It helps investigate unexpected access; **it is not an
+antivirus, an access-control driver, or a guarantee against cookie theft.** It
+shows a notification-area (tray) icon while running and offers an **opt-in**
+enforcement mode that terminates a process only on high-confidence signals.
+License: [MIT](LICENSE).
 
 ## What works
 
@@ -30,6 +32,11 @@ has been validated for this build. License: [MIT](LICENSE).
   Repeated observations are deduplicated while continuously visible.
 - Explicit coverage-gap counters and English/Turkish operational messages.
 - Login startup entry using the Windows registry API, not a shell command.
+- A notification-area (tray) icon with menu entries to open the log, open the
+  log folder, and quit, so it is visible that the monitor is running.
+- Opt-in enforcement (`--protect`, `--protect-review`) that terminates a process
+  only on configured high-confidence signals, never critical Windows processes,
+  and logs every action. Off by default.
 
 ## Limits — read before relying on this tool
 
@@ -37,7 +44,7 @@ has been validated for this build. License: [MIT](LICENSE).
 |---|---|
 | Observe a readable file handle still open during a scan | Implemented; synthetic Windows integration tests |
 | Prove file contents were read or stolen | Not supported |
-| Intercept or deny a read before it happens | Not supported |
+| Opt-in termination on a high-confidence signal | Implemented and live-tested; not true read-time prevention |
 | Reliably catch short-lived reads between scans | Not supported |
 | Detect a browser started with remote-debugging switches | Signal implemented (`remote_debugging_switch`, high) |
 | Detect browser injection or in-memory scraping | Not implemented |
@@ -96,6 +103,55 @@ VoidStealer ([Gen Digital](https://www.gendigital.com/blog/insights/research/voi
 Epsilon ([Malpedia](https://malpedia.caad.fkie.fraunhofer.de/details/win.epsilon_stealer)).
 Run `cookieguard threats` for the machine-readable catalog.
 
+## Tray icon
+
+While `run` is active (and stdout is not `--json`), CookieGuard shows a
+notification-area icon with a right-click menu: open the event log, open the log
+folder, and quit. A double-click opens the log. Windows 11 hides new tray icons
+by default — click the `^` arrow and drag the CookieGuard icon onto the taskbar
+to keep it visible. The windowless `cookieguard-tray.exe` build is intended for
+`install` so no console window appears at login.
+
+## Enforcement (opt-in, off by default)
+
+User-mode monitoring cannot intercept a read that already happened, so
+enforcement is deliberately limited and off by default:
+
+- `--protect` terminates a process only when the assessment is `high` (currently
+  the Chromium remote-debugging technique).
+- `--protect-review` additionally terminates a process that is both unsigned and
+  running from a user-writable location while holding a readable handle.
+- Critical Windows processes (`lsass.exe`, `explorer.exe`, `MsMpEng.exe`, …),
+  PID 0–4, and CookieGuard itself are never terminated.
+- Every decision is written to the log as a `terminate` record with the reason
+  and any error.
+
+A false positive can close a legitimate tool (for example a backup or migration
+utility). Use it only if you accept that risk. Terminating another user's or a
+protected process requires administrator rights.
+
+## Icons, builds, and code signing
+
+```powershell
+./build.ps1 -Version v1.3-dev
+```
+
+`build.ps1` regenerates the icon, resource file, runs tests and vet, and produces
+`cookieguard.exe` (console) and `cookieguard-tray.exe` (windowless). The icon
+(`assets/cookieguard.ico`) and manifest are drawn from code and embedded with
+`github.com/akavel/rsrc`; the generated `rsrc.syso` is not committed.
+
+This project does **not** ship a real code-signing certificate. Signing requires a
+trusted certificate you own:
+
+```powershell
+signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f your-cert.pfx cookieguard.exe
+```
+
+Until it is signed, Windows SmartScreen may warn on first run. A self-signed
+certificate only silences the warning on machines that trust it; do not present
+that as trusted signing.
+
 ## Build and use (Windows, Go 1.26.0+)
 
 ```powershell
@@ -121,6 +177,9 @@ go build -trimpath -ldflags "-X main.version=v1.3-dev" -o cookieguard.exe ./cmd/
 | `--json` | Run-mode events as JSON Lines |
 | `--log "C:\path\events.jsonl"` | Append run-mode events to a local log |
 | `--notify` | Show review dialogs; at most one open, rate-limited to 30s |
+| `--tray` | Show the notification-area icon (default true; `--tray=false` to disable) |
+| `--protect` | OPT-IN: terminate a process only when a high-severity signal matches |
+| `--protect-review` | OPT-IN, aggressive: also terminate unsigned binaries from user-writable locations |
 | `--help` | List flags |
 
 Example:
@@ -202,6 +261,11 @@ pozitif ürettiği iddia edilmez.
   profil argümanı ve beklenmeyen tarayıcı ebeveyni. Sinyaller nedeni açıklar;
   belirli bir zararlı ailesini iddia etmez.
 - Türkçe/İngilizce çalışma mesajları ve isteğe bağlı oturum açılışı kaydı.
+- Bildirim alanında (tepsi) simge: kaydı aç, kayıt klasörünü aç, çıkış menüleri.
+  Böylece izleyicinin çalıştığı görünür olur.
+- İsteğe bağlı engelleme (`--protect`, `--protect-review`): yalnızca yapılandırılmış
+  yüksek güven sinyalinde işlem sonlandırılır; kritik Windows işlemleri asla
+  sonlandırılmaz ve her karar kayda yazılır. **Varsayılan olarak kapalıdır.**
 
 ### Sınırlar
 
@@ -259,6 +323,30 @@ Kayıtlar çerez içeriği değil; EXE/dosya yolu (kullanıcı adı içerebilir)
 başlangıç zamanı, erişim hakları ve olay bilgisi içerir. Çerezler okunmaz,
 çözülmez veya ağa gönderilmez; telemetri yoktur. Kayıtlar otomatik döndürülmez;
 disk kullanımını takip edin. Kayıtlar kurcalamaya dayanıklı değildir.
+
+### Tepsi simgesi, engelleme ve imzalama
+
+`run` çalışırken (ve `--json` yokken) bildirim alanında bir simge görünür: kaydı
+aç, kayıt klasörünü aç, çıkış. Çift tıklama kaydı açar. Windows 11 yeni tepsi
+simgelerini varsayılan olarak gizler; `^` okuna tıklayıp CookieGuard simgesini
+görev çubuğuna sürükleyerek sabitleyin. `install` için penceresiz
+`cookieguard-tray.exe` sürümü kullanılır; açılışta konsol penceresi açılmaz.
+
+Engelleme varsayılan olarak **kapalıdır**:
+`--protect` yalnızca `high` seviyede, `--protect-review` ek olarak imzasız ve
+kullanıcı-yazılabilir konumdaki süreçleri sonlandırır. Kritik Windows işlemleri
+(`lsass.exe`, `explorer.exe`, `MsMpEng.exe` vb.), PID 0–4 ve CookieGuard'ın
+kendisi asla sonlandırılmaz. Her karar kayda `terminate` olarak yazılır. Yanlış
+pozitif meşru bir aracı kapatabilir; riski kabul ediyorsanız kullanın. Başka
+kullanıcının veya korumalı bir işlemi sonlandırmak yönetici yetkisi gerektirir.
+
+Derleme: `./build.ps1 -Version v1.3-dev` simgeyi ve kaynakları üretir, test ve
+vet çalıştırır, `cookieguard.exe` ve penceresiz `cookieguard-tray.exe` üretir.
+Proje gerçek bir kod imzalama sertifikası **içermez**. İmza için kendi sertifikanızla
+`signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f sertifika.pfx cookieguard.exe`
+kullanın. İmzalanana kadar SmartScreen ilk çalıştırmada uyarabilir. Kendinden
+imzalı sertifika yalnızca onu tanıyan makinelerde uyarıyı susturur; güvenilir imza
+sayılmaz.
 
 ### Test ve günlük güvenlik
 

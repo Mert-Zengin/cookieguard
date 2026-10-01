@@ -8,23 +8,32 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/cookieguard/assets"
 	"github.com/cookieguard/internal/browser"
+	"github.com/cookieguard/internal/enforce"
 	"github.com/cookieguard/internal/handle"
 	"github.com/cookieguard/internal/notify"
 	"github.com/cookieguard/internal/proc"
 	"github.com/cookieguard/internal/threat"
+	"github.com/cookieguard/internal/tray"
 	"github.com/cookieguard/internal/watcher"
+	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 )
 
 var version = "dev"
 
 func main() {
+	// Make Turkish/English diagnostics render correctly in the Windows console.
+	if err := windows.SetConsoleOutputCP(65001); err == nil {
+		_ = windows.SetConsoleCP(65001)
+	}
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -46,6 +55,9 @@ func run(args []string, out, diagnostics io.Writer) error {
 	includeBrowsers := fs.Bool("include-browsers", false, "Also report expected browser access")
 	logPath := fs.String("log", "", "Append local JSON Lines events to this file (contains paths, not cookies)")
 	desktop := fs.Bool("notify", false, "Show rate-limited Windows review alerts")
+	trayIcon := fs.Bool("tray", true, "Show a notification-area (taskbar tray) icon while running")
+	protect := fs.Bool("protect", false, "OPT-IN: terminate processes that match a high-severity technique")
+	protectReview := fs.Bool("protect-review", false, "OPT-IN, more aggressive: also terminate unsigned binaries running from user-writable locations")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -152,6 +164,47 @@ func run(args []string, out, diagnostics io.Writer) error {
 	if *desktop {
 		alerts = notify.NewDesktop(ctx)
 	}
+	if *protect || *protectReview {
+		fmt.Fprintln(diagnostics, message(
+			"ENGEL MODU AÇIK: yalnızca yüksek/uygun sinyalde işlem sonlandırılır. Yanlış pozitif meşru bir aracı kapatabilir. Varsayılan kapalıdır, kendi sorumluluğunuzda kullanın.",
+			"ENFORCEMENT ON: processes are terminated only on high/qualifying signals. A false positive can close a legitimate tool. Off by default; use at your own risk."))
+	}
+	resolvedLog := *logPath
+	if resolvedLog == "" {
+		if cache, err := os.UserCacheDir(); err == nil {
+			resolvedLog = filepath.Join(cache, "CookieGuard", "events.jsonl")
+		}
+	}
+	var trayIconHandle *tray.Tray
+	if *trayIcon && !*jsonOutput {
+		if t, err := tray.Start(tray.Options{
+			Tooltip:   message("CookieGuard çalışıyor (gözlem)", "CookieGuard running (observing)"),
+			IconBytes: assets.Icon,
+			Balloon:   message("CookieGuard çalışıyor. Simgeyi görmek için bildirim alanındaki ^ okuna bakın.", "CookieGuard is running. Look at the ^ arrow in the notification area if you do not see the icon."),
+			Items: []tray.MenuItem{
+				{ID: 1, Label: message("Kayıt dosyasını aç", "Open event log")},
+				{ID: 2, Label: message("Kayıt klasörünü aç", "Open log folder")},
+				{Separator: true},
+				{ID: 3, Label: message("Çıkış", "Quit")},
+			},
+			OnSelect: func(id int) {
+				switch id {
+				case 1:
+					openPath(resolvedLog)
+				case 2:
+					openPath(filepath.Dir(resolvedLog))
+				case 3:
+					stop()
+				}
+			},
+			OnDoubleClick: func() { openPath(resolvedLog) },
+		}); err == nil {
+			trayIconHandle = t
+			defer trayIconHandle.Close()
+		} else {
+			fmt.Fprintf(diagnostics, "%s: %v\n", message("Tepsi simgesi başlatılamadı", "Tray icon failed to start"), err)
+		}
+	}
 	fmt.Fprintf(diagnostics, "%s: %d; Ctrl+C\n", message("İzlenen dosyalar", "Observed files"), len(paths))
 	lastStatus := ""
 	w := watcher.Watcher{
@@ -172,6 +225,24 @@ func run(args []string, out, diagnostics io.Writer) error {
 			if alerts != nil && e.Kind == "review_access" {
 				alerts.Show("CookieGuard", fmt.Sprintf("%s\n%s\nPID=%d\nEXE=%s\nFILE=%s", message("İncelenmesi gereken dosya erişimi. Saldırı kanıtı değildir.", "File access to review. This is not proof of an attack."), signalSummary(e), e.Process.PID, e.Process.Path, e.File))
 			}
+			if *protect || *protectReview {
+				decision := enforce.Decide(e.Process.PID, e.Process.Name, e.Level, e.Signals, true, *protectReview)
+				if decision.Terminate {
+					killErr := proc.Kill(uint32(e.Process.PID))
+					record := action{
+						Time: time.Now().UTC(), Kind: "terminate", PID: e.Process.PID,
+						Path: e.Process.Path, Reason: decision.Reason,
+					}
+					if killErr != nil {
+						record.Error = killErr.Error()
+					}
+					if eventLog != nil {
+						_ = json.NewEncoder(eventLog).Encode(record)
+					}
+					fmt.Fprintf(diagnostics, "%s PID=%d EXE=%q REASON=%s ERR=%v\n",
+						message("ENGELLENDİ", "BLOCKED"), record.PID, record.Path, record.Reason, killErr)
+				}
+			}
 			if *jsonOutput {
 				return json.NewEncoder(out).Encode(e)
 			}
@@ -187,6 +258,25 @@ func run(args []string, out, diagnostics io.Writer) error {
 		},
 	}
 	return w.Run(ctx)
+}
+
+// action is a local record of an enforcement decision and its outcome.
+type action struct {
+	Time   time.Time `json:"time"`
+	Kind   string    `json:"kind"`
+	PID    int       `json:"pid"`
+	Path   string    `json:"path"`
+	Reason string    `json:"reason"`
+	Error  string    `json:"error,omitempty"`
+}
+
+// openPath opens a file or folder with the user's default handler. It never
+// runs a shell string; arguments are passed separately.
+func openPath(path string) {
+	if path == "" {
+		return
+	}
+	_ = exec.Command("cmd", "/c", "start", "", path).Start()
 }
 
 const startupKey = `Software\Microsoft\Windows\CurrentVersion\Run`
@@ -207,6 +297,11 @@ func install(lang string) error {
 	if err != nil {
 		return err
 	}
+	// Prefer a windowless build for login startup so no console window appears;
+	// fall back to this executable when it is not present.
+	if gui := filepath.Join(filepath.Dir(exe), "cookieguard-tray.exe"); fileExists(gui) {
+		exe = gui
+	}
 	cache, err := os.UserCacheDir()
 	if err != nil {
 		return err
@@ -218,6 +313,11 @@ func install(lang string) error {
 	}
 	defer key.Close()
 	return key.SetStringValue("CookieGuard", `"`+exe+`" run --lang `+lang+` --notify --log "`+log+`"`)
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular()
 }
 
 func uninstall() error {

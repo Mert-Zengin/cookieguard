@@ -20,7 +20,15 @@ jobs:
         run: go test -v ./...
       - name: Static checks
         run: go vet ./...
-      - name: Build development executable
-        run: go build -trimpath -ldflags "-X main.version=v1.3-dev" -o cookieguard.exe ./cmd/cookieguard
+      - name: Build icon and resources
+        run: |
+          go run ./tools/genicon
+          go run github.com/akavel/rsrc@v0.10.2 -manifest cmd/cookieguard/cookieguard.manifest -ico assets/cookieguard.ico -o cmd/cookieguard/rsrc.syso
+      - name: Build development executables
+        run: |
+          go build -trimpath -ldflags "-X main.version=v1.3-dev" -o cookieguard.exe ./cmd/cookieguard
+          go build -trimpath -ldflags "-X main.version=v1.3-dev -H=windowsgui" -o cookieguard-tray.exe ./cmd/cookieguard
       - name: Build metadata smoke test
-        run: .\cookieguard.exe version
+        run: |
+          .\cookieguard.exe version
+          .\cookieguard.exe threats | Out-Null

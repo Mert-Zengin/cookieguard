@@ -14,7 +14,13 @@
 - Expanded monitored browser data to `Local State`, `Login Data`, `Web Data`,
   and Firefox `key4.db`/`logins.json`, in addition to cookies and sidecars.
 - Enriched process context with command line and parent process name/path.
-- Added threat-package tests; all Windows tests and `go vet` pass.
+- Added a notification-area (tray) icon with open-log / open-folder / quit menu.
+- Added opt-in enforcement (`--protect`, `--protect-review`) with a conservative
+  policy that never terminates critical processes, plus end-to-end live tests.
+- Added an application icon and manifest (generated from code and embedded with
+  `rsrc`), a windowless `cookieguard-tray.exe` build, and `build.ps1`.
+- Corrected the Windows console code page so Turkish/English text renders.
+- Added threat-package and enforcement tests; all Windows tests and `go vet` pass.
 
 ### Türkçe
 - `internal/threat` eklendi: belgelenmiş sinyal kataloğu ve `Assess` sınıflandırıcı.
@@ -28,7 +34,13 @@
 - İzlenen tarayıcı verisi `Local State`, `Login Data`, `Web Data` ve Firefox
   `key4.db`/`logins.json` ile genişletildi; çerezler ve yan dosyalar korunur.
 - Süreç bağlamı komut satırı ve ebeveyn süreç adı/yolu ile zenginleştirildi.
-- Tehdit paketi testleri eklendi; tüm Windows testleri ve `go vet` geçer.
+- Bildirim alanı (tepsi) simgesi: kaydı aç / klasörü aç / çıkış menüleri.
+- İsteğe bağlı engelleme (`--protect`, `--protect-review`); kritik işlemleri asla
+  sonlandırmayan temkinli politika ve uçtan uca canlı testler.
+- Uygulama simgesi ve manifesti (koddan üretilip `rsrc` ile gömülür), penceresiz
+  `cookieguard-tray.exe` sürümü ve `build.ps1` eklendi.
+- Windows konsol kod sayfası düzeltildi; Türkçe/İngilizce metin doğru görünür.
+- Tehdit ve engelleme paketi testleri eklendi; tüm Windows testleri ve `go vet` geçer.
 
 ## v1.2-dev (unreleased / yayımlanmadı)
 
