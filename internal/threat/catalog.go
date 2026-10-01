@@ -39,6 +39,9 @@ var familiesForSignal = map[string][]string{
 	"profile_argument": {
 		"VoidStealer", "Lumma Stealer", "Raccoon Stealer",
 	},
+	"electron_asar_payload": {
+		"Epsilon Stealer", "Lumma Stealer", "Raccoon Stealer", "VoidStealer",
+	},
 	"browser_launched_by_untrusted_parent": {
 		"Epsilon Stealer", "Lumma Stealer", "Raccoon Stealer",
 	},
@@ -104,7 +107,7 @@ func Catalog() []Family {
 		},
 		{
 			Name: "Epsilon Stealer", Platforms: []string{"windows"},
-			Signals: []string{"untrusted_cookie_access", "unsigned_binary", "user_writable_binary", "remote_debugging_switch", "browser_launched_by_untrusted_parent"},
+			Signals: []string{"untrusted_cookie_access", "unsigned_binary", "user_writable_binary", "remote_debugging_switch", "browser_launched_by_untrusted_parent", "electron_asar_payload"},
 			Notes:   "NSIS-delivered Electron-era stealer reported to exfiltrate browser cookies and credentials.",
 			Source:  "https://malpedia.caad.fkie.fraunhofer.de/details/win.epsilon_stealer",
 		},

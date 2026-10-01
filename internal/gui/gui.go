@@ -294,10 +294,23 @@ func (g *GUI) onCommand(id int) {
 	switch id {
 	case idProtect:
 		if g.opts.Protect != nil {
-			next := !g.opts.Protect.Load()
-			g.opts.Protect.Store(next)
-			if !next && g.opts.ProtectReview != nil {
-				g.opts.ProtectReview.Store(false)
+			high := g.opts.Protect.Load()
+			aggressive := g.opts.ProtectReview != nil && g.opts.ProtectReview.Load()
+			switch {
+			case !high:
+				g.opts.Protect.Store(true)
+				if g.opts.ProtectReview != nil {
+					g.opts.ProtectReview.Store(false)
+				}
+			case high && !aggressive:
+				if g.opts.ProtectReview != nil {
+					g.opts.ProtectReview.Store(true)
+				}
+			default:
+				g.opts.Protect.Store(false)
+				if g.opts.ProtectReview != nil {
+					g.opts.ProtectReview.Store(false)
+				}
 			}
 			g.Append(fmt.Sprintf("[%s] %s", nowStamp(), protectLabel(g.opts)))
 		}
@@ -317,10 +330,16 @@ func (g *GUI) onCommand(id int) {
 }
 
 func protectLabel(opts Options) string {
-	if opts.Protect != nil && opts.Protect.Load() {
-		return "Koruma: ACIK (kapat)"
+	high := opts.Protect != nil && opts.Protect.Load()
+	aggressive := opts.ProtectReview != nil && opts.ProtectReview.Load()
+	switch {
+	case high && aggressive:
+		return "Koruma: AGRESIF (kapat)"
+	case high:
+		return "Koruma: YUKSEK (agresif)"
+	default:
+		return "Koruma: kapali (ac)"
 	}
-	return "Koruma: kapali (ac)"
 }
 
 // Append queues a line for the log view.

@@ -2,9 +2,11 @@ package proc
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCurrentProcessAPIs(t *testing.T) {
@@ -44,4 +46,20 @@ func TestCurrentProcessAPIs(t *testing.T) {
 	if !strings.Contains(strings.ToLower(command), strings.ToLower(filepath.Base(exe))) {
 		t.Fatalf("wrong command line: %q", command)
 	}
+}
+
+func TestDescendantsIncludesChild(t *testing.T) {
+	cmd := exec.Command("cmd.exe", "/c", "ping", "-n", "6", "127.0.0.1")
+	if err := cmd.Start(); err != nil {
+		t.Skipf("cannot start child: %v", err)
+	}
+	defer func() { _ = cmd.Process.Kill() }()
+	time.Sleep(600 * time.Millisecond)
+	descendants := Descendants(uint32(os.Getpid()))
+	for _, d := range descendants {
+		if d == uint32(cmd.Process.Pid) {
+			return
+		}
+	}
+	t.Fatalf("direct child %d not found in %v", cmd.Process.Pid, descendants)
 }

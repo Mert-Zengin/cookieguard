@@ -45,7 +45,7 @@ Download the latest [release](https://github.com/Mert-Zengin/cookieguard/release
 (`cookieguard.exe` + `cookieguard-tray.exe`) or build it yourself:
 
 ```powershell
-./build.ps1 -Version v1.3.3
+./build.ps1 -Version v1.3.4
 ```
 
 | I want to… | Command |
@@ -90,9 +90,9 @@ Download the latest [release](https://github.com/Mert-Zengin/cookieguard/release
   and logs every action. Off by default.
 - Process-creation monitoring: a newly started **unsigned** process running from
   a user-writable/temporary location is reported as `process_started`, even if it
-  never keeps a browser-data handle open long enough for a file scan. This
-  targets loader/Electron payload chains (for example Epsilon-style). Disable
-  with `--processes=false`.
+  never keeps a browser-data handle open long enough for a file scan. An unsigned
+  Electron `app.asar` payload is raised to **high** (`electron_asar_payload`),
+  which targets Epsilon-style chains. Disable with `--processes=false`.
 
 ## Limits — read before relying on this tool
 
@@ -136,13 +136,13 @@ intervals increase work and still cannot guarantee prevention.
 
 - **I only see my browser reading its own files.** That is normal. A signed
   browser in its expected layout is hidden by default; run with
-  `--include-browsers` if you want to see it. After v1.3.3, a weak hint such as
+  `--include-browsers` if you want to see it. After v1.3.4, a weak hint such as
   an unusual parent no longer downgrades an expected browser, so normal
   self-access stops flooding the log.
 - **A known stealer or the simulator was not detected.** The read may have been
   opened and closed between two scans; a one-shot read can always be missed.
   Lower `--interval` (e.g. `250ms`) and keep the process reading/holding the file
-  longer. Since v1.3.3, `--processes` also reports a newly started **unsigned**
+  longer. Since v1.3.4, `--processes` also reports a newly started **unsigned**
   process from a user-writable/temporary location as `process_started`, which
   catches loader/Electron payload chains even when the file handle is never seen.
   It still misses a payload that is signed, runs from Program Files, or exits
@@ -165,6 +165,7 @@ explanations. `expected` means a signed binary in a known browser layout.
 | `unsigned_binary` | No verifiable embedded signature (offline) | Family sourcing below |
 | `user_writable_binary` | Runs from Temp/Downloads/ProgramData | Family sourcing below |
 | `remote_debugging_switch` | `--remote-debugging-*` on the command line | [Elastic](https://www.elastic.co/guide/en/security/8.19/potential-cookies-theft-via-browser-debugging.html), [Red Canary](https://redcanary.com/blog/threat-intelligence/google-chrome-app-bound-encryption/) |
+| `electron_asar_payload` | Unsigned Electron `app.asar` payload from a user-writable path | Epsilon (see below) |
 | `profile_argument` | Command line points at a browser profile | ABE-bypass research below |
 | `browser_launched_by_untrusted_parent` | Browser started by a non-session/browser parent | Family sourcing below |
 
@@ -213,9 +214,15 @@ User-mode monitoring cannot intercept a read that already happened, so
 enforcement is deliberately limited and off by default:
 
 - `--protect` terminates a process only when the assessment is `high` (currently
-  the Chromium remote-debugging technique).
+  the Chromium remote-debugging technique and an unsigned Electron `app.asar`
+  payload).
 - `--protect-review` additionally terminates a process that is both unsigned and
   running from a user-writable location while holding a readable handle.
+- **The whole process tree is terminated** (children first), so an Electron
+  payload's `gpu-process`/`utility`/`renderer` children cannot outlive the
+  loader.
+- The window's enforcement button cycles **Off → High → Aggressive** so you can
+  escalate live.
 - Critical Windows processes (`lsass.exe`, `explorer.exe`, `MsMpEng.exe`, …),
   PID 0–4, and CookieGuard itself are never terminated.
 - Every decision is written to the log as a `terminate` record with the reason
@@ -232,7 +239,7 @@ tools reproduce stealer-like behaviour on synthetic files only:
 
 ```powershell
 # 1) Build the Windows Sandbox test kit and generate a .wsb config
-./sandbox/prepare.ps1 -Version v1.3.3
+./sandbox/prepare.ps1 -Version v1.3.4
 # 2) Double-click sandbox\CookieGuard.generated.wsb
 ```
 
@@ -281,7 +288,7 @@ that as trusted signing.
 ```powershell
 go test ./...
 go vet ./...
-go build -trimpath -ldflags "-X main.version=v1.3.3" -o cookieguard.exe ./cmd/cookieguard
+go build -trimpath -ldflags "-X main.version=v1.3.4" -o cookieguard.exe ./cmd/cookieguard
 .\cookieguard.exe version
 .\cookieguard.exe gui          # opens the window
 .\cookieguard.exe run --lang en
@@ -403,8 +410,8 @@ pozitif ürettiği iddia edilmez.
   sonlandırılmaz ve her karar kayda yazılır. **Varsayılan olarak kapalıdır.**
 - Süreç izleme: kullanıcı-yazılabilir/geçici konumdan başlayan **imzasız** yeni
   bir süreç, dosya handle'ı hiç yakalanmasa bile `process_started` olarak bildirilir.
-  Yükleyici/Electron zincirlerini (ör. Epsilon tarzı) hedefler. `--processes=false`
-  ile kapatılır.
+  İmzasız Electron `app.asar` yükü **yüksek** (`electron_asar_payload`) seviyeye
+  çıkarılır; Epsilon tarzı zincirleri hedefler. `--processes=false` ile kapatılır.
 
 ### Sınırlar
 
@@ -440,7 +447,7 @@ garantisi verilmez; 64 MiB sınırı yalnızca yerel sorgu tamponu içindir.
 ```powershell
 go test ./...
 go vet ./...
-go build -trimpath -ldflags "-X main.version=v1.3.3" -o cookieguard.exe ./cmd/cookieguard
+go build -trimpath -ldflags "-X main.version=v1.3.4" -o cookieguard.exe ./cmd/cookieguard
 .\cookieguard.exe version
 .\cookieguard.exe gui          # pencereyi açar
 .\cookieguard.exe run --lang tr --notify --log "$env:LOCALAPPDATA\CookieGuard\events.jsonl"
@@ -484,8 +491,11 @@ görev çubuğuna sürükleyerek sabitleyin. `install` için penceresiz
 `cookieguard-tray.exe` sürümü kullanılır; açılışta konsol penceresi açılmaz.
 
 Engelleme varsayılan olarak **kapalıdır**:
-`--protect` yalnızca `high` seviyede, `--protect-review` ek olarak imzasız ve
-kullanıcı-yazılabilir konumdaki süreçleri sonlandırır. Kritik Windows işlemleri
+`--protect` yalnızca `high` seviyede (uzaktan hata ayıklama ve imzasız Electron
+`app.asar` yükü), `--protect-review` ek olarak imzasız ve kullanıcı-yazılabilir
+konumdaki süreçleri sonlandırır. **Tüm süreç ağacı** sonlandırılır (önce çocuklar),
+böylece Electron `gpu-process`/`utility`/`renderer` çocukları yükleyiciden sonra
+yaşayamaz. Pencere düğmesi **Kapalı → Yüksek → Agresif** arasında döner. Kritik Windows işlemleri
 (`lsass.exe`, `explorer.exe`, `MsMpEng.exe` vb.), PID 0–4 ve CookieGuard'ın
 kendisi asla sonlandırılmaz. Her karar kayda `terminate` olarak yazılır. Yanlış
 pozitif meşru bir aracı kapatabilir; riski kabul ediyorsanız kullanın. Başka
@@ -503,13 +513,13 @@ sayılmaz.
 
 - **Sadece tarayıcının kendi dosyalarını okuduğunu görüyorum.** Bu normaldir.
   Beklenen konumdaki imzalı tarayıcı varsayılan olarak gizlenir; görmek için
-  `--include-browsers` kullanın. v1.3.3'den sonra beklenmeyen ebeveyn gibi zayıf
+  `--include-browsers` kullanın. v1.3.4'den sonra beklenmeyen ebeveyn gibi zayıf
   bir sinyal, beklenen tarayıcıyı `review`'a düşürmez; böylece normal kendi
   kendini okuma logu doldurmaz.
 - **Bilinen bir stealer veya simülatör tespit edilmedi.** Okuma iki tarama
   arasında açılıp kapanmış olabilir; tek seferlik okuma her zaman kaçabilir.
   `--interval` değerini düşürün (ör. `250ms`) ve süreç dosyayı daha uzun süre
-  açık tutsun. v1.3.3'ten itibaren `--processes`, kullanıcı-yazılabilir/geçici
+  açık tutsun. v1.3.4'ten itibaren `--processes`, kullanıcı-yazılabilir/geçici
   konumdan başlayan **imzasız** yeni bir süreci `process_started` olarak bildirir;
   böylece dosya handle'ı hiç görülmese de yükleyici/Electron zincirleri yakalanır.
   İmzalı, Program Files'tan çalışan veya bir sonraki taramadan önce kapanan bir
@@ -534,7 +544,7 @@ kurumsal ağ olmadan.
 Zararlı örnek **gerekmeden** de doğrulayabilirsiniz:
 
 ```powershell
-./sandbox/prepare.ps1 -Version v1.3.3     # Windows Sandbox kiti + .wsb üretir
+./sandbox/prepare.ps1 -Version v1.3.4     # Windows Sandbox kiti + .wsb üretir
 # sandbox\CookieGuard.generated.wsb dosyasına çift tıklayın
 
 go run ./tools/fakecookies -profile $env:USERPROFILE       # sahte çerez + Local State

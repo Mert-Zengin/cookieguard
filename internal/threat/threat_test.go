@@ -94,6 +94,19 @@ func TestAssessProcessSignals(t *testing.T) {
 	}
 }
 
+func TestElectronAsarPayloadIsHigh(t *testing.T) {
+	a := AssessProcess(risk.ProcessInfo{
+		Path:        `C:\Users\x\AppData\Local\Temp\winhost.exe`,
+		CommandLine: `"C:\Users\x\AppData\Local\Temp\winhost.exe" --type=renderer --app-path="C:\Users\x\AppData\Local\Temp\pkg\resources\app.asar" --user-data-dir="C:\Users\x\AppData\Local\Temp\epsilon"`,
+	})
+	if a.Level != "high" || !contains(a, "electron_asar_payload") {
+		t.Fatalf("expected high electron payload: %+v", a)
+	}
+	if !hasFamily(a, "Epsilon Stealer") {
+		t.Fatalf("missing Epsilon context: %+v", a.Families)
+	}
+}
+
 func TestClassifyExpectedBrowserNotDowngraded(t *testing.T) { // A signed browser in its expected layout with only weak review hints must
 	// stay "expected", otherwise normal browser self-access floods the log.
 	weak := []Signal{{ID: "expected_browser", Severity: SeverityInfo}, {ID: "browser_launched_by_untrusted_parent", Severity: SeverityReview}}

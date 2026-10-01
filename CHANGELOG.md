@@ -1,5 +1,28 @@
 # Changelog / Değişiklikler
 
+## v1.3.4 (2026-10-01)
+
+### English
+- Live testing against an Epsilon payload showed detection but no blocking:
+  enforcement was off and the Electron payload was only `review`. Fixed:
+  - New **high** signal `electron_asar_payload`: an unsigned Electron `app.asar`
+    payload running from a user-writable location is now high, so `--protect`
+    (and the window's High mode) terminates it.
+  - Enforcement now terminates the **whole process tree** (children first), so
+    Electron `gpu-process`/`utility`/`renderer` children cannot outlive the loader.
+  - The window enforcement button cycles **Off -> High -> Aggressive**.
+- Added `proc.KillTree`/`proc.Descendants` and tests.
+
+### Türkçe
+- Epsilon örneğiyle canlı testte tespit olup engelleme olmamasının nedeni: engelleme
+  kapalıydı ve Electron yükü yalnızca `review` idi. Düzeltildi:
+  - Yeni **yüksek** sinyal `electron_asar_payload`: kullanıcı-yazılabilir konumdaki
+    imzasız Electron `app.asar` yükü artık yüksek; `--protect` (ve penceredeki
+    Yüksek modu) sonlandırır.
+  - Engelleme artık **tüm süreç ağacını** sonlandırır (önce çocuklar).
+  - Pencere düğmesi **Kapalı -> Yüksek -> Agresif** arasında döner.
+- `proc.KillTree`/`proc.Descendants` ve testleri eklendi.
+
 ## v1.3.3 (2026-10-01)
 
 ### English

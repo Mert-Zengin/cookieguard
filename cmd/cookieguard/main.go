@@ -304,7 +304,7 @@ func run(args []string, out, diagnostics io.Writer) error {
 				decision := enforce.Decide(e.Process.PID, e.Process.Name, e.Level, e.Signals, true, protectReviewOn.Load())
 				if decision.Terminate {
 					killed[e.Process.PID] = true
-					killErr := proc.Kill(uint32(e.Process.PID))
+					killErr := proc.KillTree(uint32(e.Process.PID))
 					record := action{
 						Time: time.Now().UTC(), Kind: "terminate", PID: e.Process.PID,
 						Path: e.Process.Path, Reason: decision.Reason,

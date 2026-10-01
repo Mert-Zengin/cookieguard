@@ -63,6 +63,14 @@ func userWritable(path string) bool {
 
 const remoteDebuggingHelp = "browser started with a remote-debugging switch; a documented cookie/session theft technique that interacts with a live browser profile"
 
+// electronAsarHelp documents the Electron packaging technique used by payloads
+// such as Epsilon: a malicious app shipped as an unpacked Electron app.asar.
+const electronAsarHelp = "Electron application payload (app.asar) running from a user-writable location; a documented stealer packaging technique"
+
+func hasElectronAsar(cmd string) bool {
+	return strings.Contains(strings.ToLower(cmd), "app.asar")
+}
+
 func hasRemoteDebugging(cmd string) string {
 	c := strings.ToLower(cmd)
 	for _, flag := range []string{
@@ -191,9 +199,11 @@ func AssessProcess(p risk.ProcessInfo) Assessment {
 	}
 	writable := userWritable(p.Path)
 	debugFlag := hasRemoteDebugging(p.CommandLine)
-	if !writable && debugFlag == "" {
+	asar := hasElectronAsar(p.CommandLine)
+	if !writable && debugFlag == "" && !asar {
 		return Assessment{Level: "info"}
 	}
+	signed := risk.ValidSignature(p.Path)
 	signals := []Signal{}
 	if writable {
 		signals = append(signals, Signal{
@@ -201,11 +211,16 @@ func AssessProcess(p risk.ProcessInfo) Assessment {
 			Detail: "new process runs from a user-writable or temporary location",
 		})
 	}
-	signed := risk.ValidSignature(p.Path)
 	if !signed {
 		signals = append(signals, Signal{
 			ID: "unsigned_binary", Severity: SeverityReview,
 			Detail: "new process has no verifiable embedded Authenticode signature (offline check)",
+		})
+	}
+	if asar && !signed {
+		signals = append(signals, Signal{
+			ID: "electron_asar_payload", Severity: SeverityHigh,
+			Detail: electronAsarHelp,
 		})
 	}
 	if debugFlag != "" {
@@ -214,12 +229,14 @@ func AssessProcess(p risk.ProcessInfo) Assessment {
 			Detail: remoteDebuggingHelp + " (" + debugFlag + ")",
 		})
 	}
-	level := "review"
+	if len(signals) == 0 {
+		return Assessment{Level: "info"}
+	}
 	if !hasSeverity(signals, SeverityHigh) && signed {
 		// A signed, user-writable process with no high signal is routine.
 		return Assessment{Level: "info"}
 	}
-	assessment := Assessment{Level: level, Signals: signals}
+	assessment := Assessment{Level: "review", Signals: signals}
 	if hasSeverity(signals, SeverityHigh) {
 		assessment.Level = "high"
 	}

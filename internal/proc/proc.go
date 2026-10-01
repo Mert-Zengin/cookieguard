@@ -122,6 +122,50 @@ func ParentPID(pid uint32) (uint32, error) {
 	return uint32(pbi.InheritedFromUniqueProcessId), nil
 }
 
+// Descendants returns all processes whose parent chain leads back to pid.
+// It is best-effort: a process that exits between the snapshot and the call is
+// simply absent. A depth limit guards against a corrupted parent graph.
+func Descendants(pid uint32) []uint32 {
+	snap, err := Snapshot()
+	if err != nil {
+		return nil
+	}
+	children := make(map[uint32][]uint32)
+	for _, p := range snap {
+		children[p.PPID] = append(children[p.PPID], p.PID)
+	}
+	var out []uint32
+	var walk func(uint32, int)
+	walk = func(parent uint32, depth int) {
+		if depth > 64 {
+			return
+		}
+		for _, child := range children[parent] {
+			out = append(out, child)
+			walk(child, depth+1)
+		}
+	}
+	walk(pid, 0)
+	return out
+}
+
+// KillTree terminates a process and all of its descendants. Children are killed
+// before the parent so an Electron/stealer child cannot outlive its loader.
+// It returns the first error, if any.
+func KillTree(pid uint32) error {
+	descendants := Descendants(pid)
+	var firstErr error
+	for i := len(descendants) - 1; i >= 0; i-- {
+		if err := Kill(descendants[i]); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	if err := Kill(pid); err != nil && firstErr == nil {
+		firstErr = err
+	}
+	return firstErr
+}
+
 // Kill terminates a process.
 func Kill(pid uint32) error {
 	h, err := windows.OpenProcess(windows.PROCESS_TERMINATE, false, pid)
