@@ -45,7 +45,7 @@ Download the latest [release](https://github.com/Mert-Zengin/cookieguard/release
 (`cookieguard.exe` + `cookieguard-tray.exe`) or build it yourself:
 
 ```powershell
-./build.ps1 -Version v1.3.2
+./build.ps1 -Version v1.3.3
 ```
 
 | I want to… | Command |
@@ -88,6 +88,11 @@ Download the latest [release](https://github.com/Mert-Zengin/cookieguard/release
 - Opt-in enforcement (`--protect`, `--protect-review`) that terminates a process
   only on configured high-confidence signals, never critical Windows processes,
   and logs every action. Off by default.
+- Process-creation monitoring: a newly started **unsigned** process running from
+  a user-writable/temporary location is reported as `process_started`, even if it
+  never keeps a browser-data handle open long enough for a file scan. This
+  targets loader/Electron payload chains (for example Epsilon-style). Disable
+  with `--processes=false`.
 
 ## Limits — read before relying on this tool
 
@@ -98,6 +103,7 @@ Download the latest [release](https://github.com/Mert-Zengin/cookieguard/release
 | Opt-in termination on a high-confidence signal | Implemented and live-tested; not true read-time prevention |
 | Reliably catch short-lived reads between scans | Not supported |
 | Detect a browser started with remote-debugging switches | Signal implemented (`remote_debugging_switch`, high) |
+| Detect an unsigned payload started from a user-writable location | Implemented (`process_started`), for long-enough-lived processes |
 | Detect browser injection or in-memory scraping | Not implemented |
 | Attribute an access to Lumma, RedLine, Vidar, Raccoon, Agent Tesla, Rhadamanthys, Gremlin, DarkCloud, VoidStealer, Epsilon, or Rakhni | Not supported; only shared technique context |
 | Zero false positives, <1% CPU, <5 MiB RAM | Not guaranteed; measure on your machine |
@@ -130,14 +136,18 @@ intervals increase work and still cannot guarantee prevention.
 
 - **I only see my browser reading its own files.** That is normal. A signed
   browser in its expected layout is hidden by default; run with
-  `--include-browsers` if you want to see it. After v1.3.2, a weak hint such as
+  `--include-browsers` if you want to see it. After v1.3.3, a weak hint such as
   an unusual parent no longer downgrades an expected browser, so normal
   self-access stops flooding the log.
-- **A known stealer or the simulator was not detected.** Most likely the file
-  handle was opened and closed between two scans; a one-shot read can always be
-  missed. Lower `--interval` (e.g. `250ms`) and keep the process reading/holding
-  the file longer. True read-time coverage needs an access-audit or minifilter
-  design (see below).
+- **A known stealer or the simulator was not detected.** The read may have been
+  opened and closed between two scans; a one-shot read can always be missed.
+  Lower `--interval` (e.g. `250ms`) and keep the process reading/holding the file
+  longer. Since v1.3.3, `--processes` also reports a newly started **unsigned**
+  process from a user-writable/temporary location as `process_started`, which
+  catches loader/Electron payload chains even when the file handle is never seen.
+  It still misses a payload that is signed, runs from Program Files, or exits
+  before the next scan. True read-time coverage needs an access-audit (SACL +
+  Security event 4663) or minifilter design, which is not implemented yet.
 - **`unsigned_binary` shows for a legitimate program.** Offline Authenticode
   verification can fail for catalog-only or trust-unavailable binaries; treat it
   as a review hint, not a verdict.
@@ -222,7 +232,7 @@ tools reproduce stealer-like behaviour on synthetic files only:
 
 ```powershell
 # 1) Build the Windows Sandbox test kit and generate a .wsb config
-./sandbox/prepare.ps1 -Version v1.3.2
+./sandbox/prepare.ps1 -Version v1.3.3
 # 2) Double-click sandbox\CookieGuard.generated.wsb
 ```
 
@@ -271,7 +281,7 @@ that as trusted signing.
 ```powershell
 go test ./...
 go vet ./...
-go build -trimpath -ldflags "-X main.version=v1.3.2" -o cookieguard.exe ./cmd/cookieguard
+go build -trimpath -ldflags "-X main.version=v1.3.3" -o cookieguard.exe ./cmd/cookieguard
 .\cookieguard.exe version
 .\cookieguard.exe gui          # opens the window
 .\cookieguard.exe run --lang en
@@ -293,6 +303,7 @@ go build -trimpath -ldflags "-X main.version=v1.3.2" -o cookieguard.exe ./cmd/co
 | `--json` | Run-mode events as JSON Lines |
 | `--log "C:\path\events.jsonl"` | Append run-mode events to a local log |
 | `--notify` | Show review dialogs; at most one open, rate-limited to 30s |
+| `--processes` | Watch newly started unsigned processes in user-writable locations (default true; `--processes=false` to disable) |
 | `--tray` | Show the notification-area icon (default true; `--tray=false` to disable) |
 | `--protect` | OPT-IN: terminate a process only when a high-severity signal matches |
 | `--protect-review` | OPT-IN, aggressive: also terminate unsigned binaries from user-writable locations |
@@ -390,6 +401,10 @@ pozitif ürettiği iddia edilmez.
 - İsteğe bağlı engelleme (`--protect`, `--protect-review`): yalnızca yapılandırılmış
   yüksek güven sinyalinde işlem sonlandırılır; kritik Windows işlemleri asla
   sonlandırılmaz ve her karar kayda yazılır. **Varsayılan olarak kapalıdır.**
+- Süreç izleme: kullanıcı-yazılabilir/geçici konumdan başlayan **imzasız** yeni
+  bir süreç, dosya handle'ı hiç yakalanmasa bile `process_started` olarak bildirilir.
+  Yükleyici/Electron zincirlerini (ör. Epsilon tarzı) hedefler. `--processes=false`
+  ile kapatılır.
 
 ### Sınırlar
 
@@ -425,7 +440,7 @@ garantisi verilmez; 64 MiB sınırı yalnızca yerel sorgu tamponu içindir.
 ```powershell
 go test ./...
 go vet ./...
-go build -trimpath -ldflags "-X main.version=v1.3.2" -o cookieguard.exe ./cmd/cookieguard
+go build -trimpath -ldflags "-X main.version=v1.3.3" -o cookieguard.exe ./cmd/cookieguard
 .\cookieguard.exe version
 .\cookieguard.exe gui          # pencereyi açar
 .\cookieguard.exe run --lang tr --notify --log "$env:LOCALAPPDATA\CookieGuard\events.jsonl"
@@ -488,14 +503,18 @@ sayılmaz.
 
 - **Sadece tarayıcının kendi dosyalarını okuduğunu görüyorum.** Bu normaldir.
   Beklenen konumdaki imzalı tarayıcı varsayılan olarak gizlenir; görmek için
-  `--include-browsers` kullanın. v1.3.2'den sonra beklenmeyen ebeveyn gibi zayıf
+  `--include-browsers` kullanın. v1.3.3'den sonra beklenmeyen ebeveyn gibi zayıf
   bir sinyal, beklenen tarayıcıyı `review`'a düşürmez; böylece normal kendi
   kendini okuma logu doldurmaz.
-- **Bilinen bir stealer veya simülatör tespit edilmedi.** Büyük olasılıkla dosya
-  handle'ı iki tarama arasında açılıp kapanmıştır; tek seferlik okuma her zaman
-  kaçabilir. `--interval` değerini düşürün (ör. `250ms`) ve süreç dosyayı daha
-  uzun süre açık tutsun. Gerçek okuma-anı kapsaması için erişim denetimi (audit)
-  veya minifilter tasarımı gerekir.
+- **Bilinen bir stealer veya simülatör tespit edilmedi.** Okuma iki tarama
+  arasında açılıp kapanmış olabilir; tek seferlik okuma her zaman kaçabilir.
+  `--interval` değerini düşürün (ör. `250ms`) ve süreç dosyayı daha uzun süre
+  açık tutsun. v1.3.3'ten itibaren `--processes`, kullanıcı-yazılabilir/geçici
+  konumdan başlayan **imzasız** yeni bir süreci `process_started` olarak bildirir;
+  böylece dosya handle'ı hiç görülmese de yükleyici/Electron zincirleri yakalanır.
+  İmzalı, Program Files'tan çalışan veya bir sonraki taramadan önce kapanan bir
+  yük hâlâ kaçabilir. Gerçek okuma-anı kapsaması için erişim denetimi (SACL +
+  Güvenlik olayı 4663) veya minifilter gerekir; henüz uygulanmadı.
 - **Meşru bir programda `unsigned_binary` görünüyor.** Çevrimdışı Authenticode
   doğrulaması bazı meşru ikililerde başarısız olabilir; bunu karar değil, inceleme
   ipucu olarak görün.
@@ -515,7 +534,7 @@ kurumsal ağ olmadan.
 Zararlı örnek **gerekmeden** de doğrulayabilirsiniz:
 
 ```powershell
-./sandbox/prepare.ps1 -Version v1.3.2     # Windows Sandbox kiti + .wsb üretir
+./sandbox/prepare.ps1 -Version v1.3.3     # Windows Sandbox kiti + .wsb üretir
 # sandbox\CookieGuard.generated.wsb dosyasına çift tıklayın
 
 go run ./tools/fakecookies -profile $env:USERPROFILE       # sahte çerez + Local State

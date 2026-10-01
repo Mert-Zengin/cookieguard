@@ -1,5 +1,26 @@
 # Changelog / Değişiklikler
 
+## v1.3.3 (2026-10-01)
+
+### English
+- Added process-creation monitoring (`--processes`, default on): a newly started
+  unsigned process running from a user-writable/temporary location is reported as
+  `process_started`, catching loader/Electron payload chains (for example
+  Epsilon-style) even when no browser-data handle is caught open. Exit/permission
+  failures are ignored, never guessed.
+- The process sensor complements the handle scan; it does not replace
+  read-time coverage (still needs an access audit or minifilter).
+- Added tests for process assessment and one-shot process event deduplication.
+
+### Türkçe
+- Süreç oluşturma izleme eklendi (`--processes`, varsayılan açık):
+  kullanıcı-yazılabilir/geçici konumdan başlayan imzasız yeni süreç
+  `process_started` olarak bildirilir; dosya handle'ı yakalanmasa bile
+  yükleyici/Electron zincirleri (ör. Epsilon tarzı) görünür.
+- Süreç sensörü handle taramasını tamamlar; okuma-anı kapsamasının yerini almaz
+  (erişim denetimi veya minifilter hâlâ gerekir).
+- Süreç değerlendirmesi ve tek seferlik süreç olayı tekilleştirmesi için testler.
+
 ## v1.3.2 (2026-10-01)
 
 ### English

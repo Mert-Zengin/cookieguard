@@ -22,6 +22,7 @@ import (
 	"github.com/cookieguard/internal/handle"
 	"github.com/cookieguard/internal/notify"
 	"github.com/cookieguard/internal/proc"
+	"github.com/cookieguard/internal/risk"
 	"github.com/cookieguard/internal/threat"
 	"github.com/cookieguard/internal/tray"
 	"github.com/cookieguard/internal/watcher"
@@ -64,6 +65,7 @@ func run(args []string, out, diagnostics io.Writer) error {
 	trayIcon := fs.Bool("tray", true, "Show a notification-area (taskbar tray) icon while running")
 	protect := fs.Bool("protect", false, "OPT-IN: terminate processes that match a high-severity technique")
 	protectReview := fs.Bool("protect-review", false, "OPT-IN, more aggressive: also terminate unsigned binaries running from user-writable locations")
+	processWatch := fs.Bool("processes", true, "Watch for newly started unsigned processes in user-writable locations (loader/payload detection)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -234,8 +236,50 @@ func run(args []string, out, diagnostics io.Writer) error {
 	fmt.Fprintf(diagnostics, "%s: %d; Ctrl+C\n", message("İzlenen dosyalar", "Observed files"), len(paths))
 	lastStatus := ""
 	killed := make(map[int]bool)
+	var started func() []risk.ProcessInfo
+	if *processWatch {
+		procSeen := make(map[uint32]int64)
+		primed := false
+		started = func() []risk.ProcessInfo {
+			snap, err := proc.Snapshot()
+			if err != nil {
+				return nil
+			}
+			var out []risk.ProcessInfo
+			for _, e := range snap {
+				if e.PID <= 4 || int(e.PID) == os.Getpid() {
+					continue
+				}
+				st, err := proc.StartTime(e.PID)
+				if err != nil {
+					continue
+				}
+				if prev, ok := procSeen[e.PID]; ok && prev == st {
+					continue
+				}
+				procSeen[e.PID] = st
+				if primed {
+					path, err := proc.ImagePath(e.PID)
+					if err != nil || path == "" || !threat.UserWritable(path) {
+						continue
+					}
+					cmd, _ := proc.CommandLine(e.PID)
+					ppid, _ := proc.ParentPID(e.PID)
+					ppath, _ := proc.ImagePath(ppid)
+					out = append(out, risk.ProcessInfo{
+						PID: int(e.PID), Name: filepath.Base(path), Path: path, StartTime: st,
+						CommandLine: cmd, ParentPID: int(ppid),
+						ParentName: filepath.Base(ppath), ParentPath: ppath,
+					})
+				}
+			}
+			primed = true
+			return out
+		}
+	}
 	w := watcher.Watcher{
 		Interval: *interval, Discover: discover, IncludeBrowsers: *includeBrowsers,
+		Started: started,
 		Status: func(r handle.Report) {
 			status := fmt.Sprintf("%d/%d/%d/%d", r.TargetsAvailable, r.InaccessibleProcesses, r.UnresolvedHandles, len(r.UnavailableTargets))
 			if window != nil {
@@ -281,6 +325,16 @@ func run(args []string, out, diagnostics io.Writer) error {
 			}
 			if *jsonOutput {
 				return json.NewEncoder(out).Encode(e)
+			}
+			if e.Kind == "process_started" {
+				pline := fmt.Sprintf("[%s] %s LEVEL=%s PID=%d EXE=%q PARENT=%q CMD=%q SIGNALS=%s",
+					e.Time.Format(time.RFC3339), message("YENİ SÜREÇ", "NEW PROCESS"), e.Level,
+					e.Process.PID, e.Process.Path, e.Process.ParentName, e.Process.CommandLine, signalSummary(e))
+				if window != nil {
+					window.Append(pline)
+				}
+				_, err := fmt.Fprintln(out, pline)
+				return err
 			}
 			label := message("İNCELE: okunabilir dosya erişimi (tek başına saldırı kanıtı değil)", "REVIEW: readable file access (not proof of an attack)")
 			if e.Kind == "browser_access" {

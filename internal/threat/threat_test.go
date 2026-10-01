@@ -74,8 +74,27 @@ func TestBrowserLayoutWithUntrustedParentIsReview(t *testing.T) {
 	}
 }
 
-func TestClassifyExpectedBrowserNotDowngraded(t *testing.T) {
-	// A signed browser in its expected layout with only weak review hints must
+func TestAssessProcessSignals(t *testing.T) {
+	// Unsigned process in a user-writable location -> review.
+	a := AssessProcess(risk.ProcessInfo{Path: `C:\Users\x\AppData\Local\Temp\payload.exe`})
+	if a.Level != "review" || !contains(a, "user_writable_binary") || !contains(a, "unsigned_binary") {
+		t.Fatalf("unexpected assessment: %+v", a)
+	}
+	// Not user-writable -> info (ignored).
+	if got := AssessProcess(risk.ProcessInfo{Path: `C:\Program Files\Vendor\app.exe`}); got.Level != "info" {
+		t.Fatalf("non-user-writable process flagged: %+v", got)
+	}
+	// Remote debugging -> high even outside a user-writable path.
+	high := AssessProcess(risk.ProcessInfo{Path: `C:\Program Files\Vendor\app.exe`, CommandLine: `app.exe --remote-debugging-port=9222`})
+	if high.Level != "high" || !contains(high, "remote_debugging_switch") {
+		t.Fatalf("expected high for remote debugging: %+v", high)
+	}
+	if !hasFamily(high, "VoidStealer") {
+		t.Fatalf("missing family context: %+v", high.Families)
+	}
+}
+
+func TestClassifyExpectedBrowserNotDowngraded(t *testing.T) { // A signed browser in its expected layout with only weak review hints must
 	// stay "expected", otherwise normal browser self-access floods the log.
 	weak := []Signal{{ID: "expected_browser", Severity: SeverityInfo}, {ID: "browser_launched_by_untrusted_parent", Severity: SeverityReview}}
 	if got := classify(true, true, weak); got != "expected" {

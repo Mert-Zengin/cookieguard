@@ -76,6 +76,33 @@ func TestEmitAndScanErrorsPropagate(t *testing.T) {
 	}
 }
 
+func TestStartedProcessEmittedOnce(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	events := 0
+	p := risk.ProcessInfo{PID: 42, Path: `C:\Users\x\AppData\Local\Temp\payload.exe`, StartTime: 7}
+	w := Watcher{
+		Interval: 100 * time.Millisecond,
+		Discover: func() ([]string, error) { return []string{"synthetic"}, nil },
+		scan:     func([]string) (handle.Report, error) { return handle.Report{}, nil },
+		Started:  func() []risk.ProcessInfo { return []risk.ProcessInfo{p} },
+		Emit: func(e Event) error {
+			if e.Kind != "process_started" {
+				t.Fatalf("unexpected kind %s", e.Kind)
+			}
+			events++
+			cancel()
+			return nil
+		},
+	}
+	if err := w.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if events != 1 {
+		t.Fatalf("process event emitted %d times, want 1", events)
+	}
+}
+
 func TestRunValidationAndCancellation(t *testing.T) {
 	w := Watcher{Interval: time.Second}
 	if w.Run(context.Background()) == nil {

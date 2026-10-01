@@ -177,6 +177,65 @@ func classify(browserLayout, signed bool, signals []Signal) string {
 	return "review"
 }
 
+// UserWritable reports whether a path is under a location untrusted binaries
+// commonly run from. It is a review hint, not proof of malice.
+func UserWritable(path string) bool { return userWritable(path) }
+
+// AssessProcess evaluates a newly started process without a file observation.
+// It is meant for loader/payload detection (for example an unsigned Electron or
+// NSIS payload running from a temporary folder), where a file handle may never
+// be caught open. It returns level "info" when nothing deserves attention.
+func AssessProcess(p risk.ProcessInfo) Assessment {
+	if p.Path == "" {
+		return Assessment{Level: "info"}
+	}
+	writable := userWritable(p.Path)
+	debugFlag := hasRemoteDebugging(p.CommandLine)
+	if !writable && debugFlag == "" {
+		return Assessment{Level: "info"}
+	}
+	signals := []Signal{}
+	if writable {
+		signals = append(signals, Signal{
+			ID: "user_writable_binary", Severity: SeverityReview,
+			Detail: "new process runs from a user-writable or temporary location",
+		})
+	}
+	signed := risk.ValidSignature(p.Path)
+	if !signed {
+		signals = append(signals, Signal{
+			ID: "unsigned_binary", Severity: SeverityReview,
+			Detail: "new process has no verifiable embedded Authenticode signature (offline check)",
+		})
+	}
+	if debugFlag != "" {
+		signals = append(signals, Signal{
+			ID: "remote_debugging_switch", Severity: SeverityHigh,
+			Detail: remoteDebuggingHelp + " (" + debugFlag + ")",
+		})
+	}
+	level := "review"
+	if !hasSeverity(signals, SeverityHigh) && signed {
+		// A signed, user-writable process with no high signal is routine.
+		return Assessment{Level: "info"}
+	}
+	assessment := Assessment{Level: level, Signals: signals}
+	if hasSeverity(signals, SeverityHigh) {
+		assessment.Level = "high"
+	}
+	assessment.Families = associatedFamilies(signals)
+	return assessment
+}
+
+func hasSeverity(signals []Signal, severity Severity) bool {
+	for _, s := range signals {
+		if s.Severity == severity {
+			return true
+		}
+	}
+	return false
+}
+
 func associatedFamilies(signals []Signal) []string {
 	seen := map[string]bool{}
 	for _, s := range signals {

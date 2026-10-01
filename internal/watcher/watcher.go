@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/cookieguard/internal/handle"
+	"github.com/cookieguard/internal/risk"
 	"github.com/cookieguard/internal/threat"
 )
 
@@ -28,6 +29,7 @@ type Watcher struct {
 	Emit            func(Event) error
 	Status          func(handle.Report)
 	IncludeBrowsers bool
+	Started         func() []risk.ProcessInfo
 	scan            func([]string) (handle.Report, error)
 }
 
@@ -97,6 +99,29 @@ func (w *Watcher) Run(ctx context.Context) error {
 			if !previous[key] {
 				if err := w.Emit(event); err != nil {
 					return err
+				}
+			}
+		}
+		if w.Started != nil {
+			for _, p := range w.Started() {
+				assessment := threat.AssessProcess(p)
+				if assessment.Level == "info" {
+					continue
+				}
+				event := Event{
+					Time: time.Now().UTC(), Kind: "process_started", Level: assessment.Level,
+					Signals: assessment.Signals, Families: assessment.Families,
+					Observation: handle.Observation{Process: p},
+				}
+				key := eventKey(event)
+				if current[key] {
+					continue
+				}
+				current[key] = true
+				if !previous[key] {
+					if err := w.Emit(event); err != nil {
+						return err
+					}
 				}
 			}
 		}
