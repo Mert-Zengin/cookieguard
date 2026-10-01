@@ -25,5 +25,8 @@ coverage.out
 # Generated at build time by build.ps1 / CI (icon resources).
 /cmd/cookieguard/rsrc.syso
 
+# Release checksums (attached to the GitHub release, not source).
+/SHA256SUMS.txt
+
 # Do NOT ignore source files
 !*.go

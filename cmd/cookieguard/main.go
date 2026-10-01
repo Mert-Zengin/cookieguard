@@ -12,11 +12,13 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/cookieguard/assets"
 	"github.com/cookieguard/internal/browser"
 	"github.com/cookieguard/internal/enforce"
+	"github.com/cookieguard/internal/gui"
 	"github.com/cookieguard/internal/handle"
 	"github.com/cookieguard/internal/notify"
 	"github.com/cookieguard/internal/proc"
@@ -33,6 +35,10 @@ func main() {
 	// Make Turkish/English diagnostics render correctly in the Windows console.
 	if err := windows.SetConsoleOutputCP(65001); err == nil {
 		_ = windows.SetConsoleCP(65001)
+	}
+	// Double-clicking the executable (no arguments) opens the window.
+	if len(os.Args) == 1 {
+		os.Args = append(os.Args, "gui")
 	}
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -76,6 +82,10 @@ func run(args []string, out, diagnostics io.Writer) error {
 		}
 		return en
 	}
+	// Enforcement is runtime-toggleable from the window, so use atomic flags.
+	var protectOn, protectReviewOn atomic.Bool
+	protectOn.Store(*protect)
+	protectReviewOn.Store(*protectReview)
 	switch command {
 	case "version":
 		fmt.Fprintln(out, "CookieGuard", version)
@@ -97,11 +107,11 @@ func run(args []string, out, diagnostics io.Writer) error {
 			Families  []threat.Family `json:"families"`
 			Technique []string        `json:"technique_sources"`
 		}{threat.Catalog(), threat.TechniqueSources})
-	case "run", "scan":
+	case "run", "scan", "gui":
 	default:
-		return fmt.Errorf("unknown command %q (run, scan, version, install, uninstall, threats)", command)
+		return fmt.Errorf("unknown command %q (run, scan, gui, version, install, uninstall, threats)", command)
 	}
-	if command == "run" && *interval < 100*time.Millisecond {
+	if (command == "run" || command == "gui") && *interval < 100*time.Millisecond {
 		return errors.New("scan interval must be at least 100ms")
 	}
 	if *profile == "" {
@@ -164,7 +174,7 @@ func run(args []string, out, diagnostics io.Writer) error {
 	if *desktop {
 		alerts = notify.NewDesktop(ctx)
 	}
-	if *protect || *protectReview {
+	if protectOn.Load() || protectReviewOn.Load() {
 		fmt.Fprintln(diagnostics, message(
 			"ENGEL MODU AÇIK: yalnızca yüksek/uygun sinyalde işlem sonlandırılır. Yanlış pozitif meşru bir aracı kapatabilir. Varsayılan kapalıdır, kendi sorumluluğunuzda kullanın.",
 			"ENFORCEMENT ON: processes are terminated only on high/qualifying signals. A false positive can close a legitimate tool. Off by default; use at your own risk."))
@@ -173,6 +183,22 @@ func run(args []string, out, diagnostics io.Writer) error {
 	if resolvedLog == "" {
 		if cache, err := os.UserCacheDir(); err == nil {
 			resolvedLog = filepath.Join(cache, "CookieGuard", "events.jsonl")
+		}
+	}
+	var window *gui.GUI
+	if command == "gui" {
+		if g, err := gui.New(gui.Options{
+			Title:         message("CookieGuard - tarayıcı verisi izleyici", "CookieGuard - browser data monitor"),
+			IconBytes:     assets.Icon,
+			Protect:       &protectOn,
+			ProtectReview: &protectReviewOn,
+			OnOpenLog:     func() { openPath(resolvedLog) },
+			OnQuit:        stop,
+		}); err == nil {
+			window = g
+			defer window.Close()
+		} else {
+			fmt.Fprintf(diagnostics, "%s: %v\n", message("Pencere açılamadı", "Window failed to open"), err)
 		}
 	}
 	var trayIconHandle *tray.Tray
@@ -211,6 +237,10 @@ func run(args []string, out, diagnostics io.Writer) error {
 		Interval: *interval, Discover: discover, IncludeBrowsers: *includeBrowsers,
 		Status: func(r handle.Report) {
 			status := fmt.Sprintf("%d/%d/%d/%d", r.TargetsAvailable, r.InaccessibleProcesses, r.UnresolvedHandles, len(r.UnavailableTargets))
+			if window != nil {
+				window.SetStatus(fmt.Sprintf("Durum: izleniyor - dosya=%d, erisilemeyen islem=%d, cozulemeyen handle=%d, eksik dosya=%d",
+					r.TargetsAvailable, r.InaccessibleProcesses, r.UnresolvedHandles, len(r.UnavailableTargets)))
+			}
 			if status != lastStatus {
 				fmt.Fprintf(diagnostics, "%s: observed_files=%d inaccessible_processes=%d unresolved_handles=%d unavailable_files=%d\n", message("Tarama kapsamı", "Scan coverage"), r.TargetsAvailable, r.InaccessibleProcesses, r.UnresolvedHandles, len(r.UnavailableTargets))
 				lastStatus = status
@@ -225,8 +255,8 @@ func run(args []string, out, diagnostics io.Writer) error {
 			if alerts != nil && e.Kind == "review_access" {
 				alerts.Show("CookieGuard", fmt.Sprintf("%s\n%s\nPID=%d\nEXE=%s\nFILE=%s", message("İncelenmesi gereken dosya erişimi. Saldırı kanıtı değildir.", "File access to review. This is not proof of an attack."), signalSummary(e), e.Process.PID, e.Process.Path, e.File))
 			}
-			if *protect || *protectReview {
-				decision := enforce.Decide(e.Process.PID, e.Process.Name, e.Level, e.Signals, true, *protectReview)
+			if protectOn.Load() || protectReviewOn.Load() {
+				decision := enforce.Decide(e.Process.PID, e.Process.Name, e.Level, e.Signals, true, protectReviewOn.Load())
 				if decision.Terminate {
 					killErr := proc.Kill(uint32(e.Process.PID))
 					record := action{
@@ -239,8 +269,12 @@ func run(args []string, out, diagnostics io.Writer) error {
 					if eventLog != nil {
 						_ = json.NewEncoder(eventLog).Encode(record)
 					}
-					fmt.Fprintf(diagnostics, "%s PID=%d EXE=%q REASON=%s ERR=%v\n",
+					line := fmt.Sprintf("%s PID=%d EXE=%q REASON=%s ERR=%v",
 						message("ENGELLENDİ", "BLOCKED"), record.PID, record.Path, record.Reason, killErr)
+					fmt.Fprintln(diagnostics, line)
+					if window != nil {
+						window.Append("[!] " + line)
+					}
 				}
 			}
 			if *jsonOutput {
@@ -253,7 +287,11 @@ func run(args []string, out, diagnostics io.Writer) error {
 			if e.Level == "high" {
 				label = message("YÜKSEK ÖNCELİK: belgelenmiş bir hırsızlık tekniğiyle uyumlu", "HIGH: matches a documented theft technique")
 			}
-			_, err := fmt.Fprintf(out, "[%s] %s PID=%d EXE=%q FILE=%q SIGNALS=%s\n", e.Time.Format(time.RFC3339), label, e.Process.PID, e.Process.Path, e.File, signalSummary(e))
+			line := fmt.Sprintf("[%s] %s PID=%d EXE=%q FILE=%q SIGNALS=%s", e.Time.Format(time.RFC3339), label, e.Process.PID, e.Process.Path, e.File, signalSummary(e))
+			if window != nil {
+				window.Append(line)
+			}
+			_, err := fmt.Fprintln(out, line)
 			return err
 		},
 	}

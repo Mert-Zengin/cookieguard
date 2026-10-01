@@ -5,8 +5,9 @@
 CookieGuard observes processes holding readable handles to browser cookie and
 credential files. It helps investigate unexpected access; **it is not an
 antivirus, an access-control driver, or a guarantee against cookie theft.** It
-shows a notification-area (tray) icon while running and offers an **opt-in**
-enforcement mode that terminates a process only on high-confidence signals.
+shows a notification-area (tray) icon while running, opens a **live window** when
+you double-click the executable, and offers an **opt-in** enforcement mode that
+terminates a process only on high-confidence signals.
 License: [MIT](LICENSE).
 
 ## What works
@@ -34,6 +35,8 @@ License: [MIT](LICENSE).
 - Login startup entry using the Windows registry API, not a shell command.
 - A notification-area (tray) icon with menu entries to open the log, open the
   log folder, and quit, so it is visible that the monitor is running.
+- A native window (`gui` command, or just double-click) that shows live events,
+  scan coverage, and a button to turn enforcement on/off at runtime.
 - Opt-in enforcement (`--protect`, `--protect-review`) that terminates a process
   only on configured high-confidence signals, never critical Windows processes,
   and logs every action. Off by default.
@@ -103,6 +106,23 @@ VoidStealer ([Gen Digital](https://www.gendigital.com/blog/insights/research/voi
 Epsilon ([Malpedia](https://malpedia.caad.fkie.fraunhofer.de/details/win.epsilon_stealer)).
 Run `cookieguard threats` for the machine-readable catalog.
 
+## Window (GUI)
+
+Double-clicking `cookieguard.exe` (or `cookieguard-tray.exe`) with no arguments
+opens a native window; `cookieguard.exe gui` does the same from a terminal. The
+window shows:
+
+- a status line with how many files are observed and how many processes/handles
+  were inaccessible or unresolved (coverage gaps, not "safe");
+- a live list of access events with time, level, PID, executable, file, and
+  signals;
+- buttons: **Koruma: kapali/ac** (toggle enforcement live), **Kaydi Ac** (open
+  the log), **Temizle** (clear the view), **Cikis** (quit).
+
+The window does not change what is monitored; enforcement stays off until you
+either pass `--protect`/`--protect-review` or click the toggle. A false positive
+can close a legitimate tool.
+
 ## Tray icon
 
 While `run` is active (and stdout is not `--json`), CookieGuard shows a
@@ -157,14 +177,16 @@ that as trusted signing.
 ```powershell
 go test ./...
 go vet ./...
-go build -trimpath -ldflags "-X main.version=v1.3-dev" -o cookieguard.exe ./cmd/cookieguard
+go build -trimpath -ldflags "-X main.version=v1.3.0" -o cookieguard.exe ./cmd/cookieguard
 .\cookieguard.exe version
+.\cookieguard.exe gui          # opens the window
 .\cookieguard.exe run --lang en
 ```
 
 | Command / option | Meaning |
 |---|---|
 | `run` (or no command) | Observe the current user's discovered cookie files |
+| `gui` | Same as `run` but with a live window (also the default on double-click) |
 | `scan` | Single scan; report and coverage counters as JSON on stdout |
 | `version` | Print embedded build version |
 | `threats` | Print the documented family/technique catalog and sources as JSON |
@@ -263,6 +285,8 @@ pozitif ürettiği iddia edilmez.
 - Türkçe/İngilizce çalışma mesajları ve isteğe bağlı oturum açılışı kaydı.
 - Bildirim alanında (tepsi) simge: kaydı aç, kayıt klasörünü aç, çıkış menüleri.
   Böylece izleyicinin çalıştığı görünür olur.
+- Yerel pencere (`gui` komutu veya çift tıklama): canlı olay listesi, tarama
+  kapsamı ve korumayı çalışırken aç/kapa düğmesi.
 - İsteğe bağlı engelleme (`--protect`, `--protect-review`): yalnızca yapılandırılmış
   yüksek güven sinyalinde işlem sonlandırılır; kritik Windows işlemleri asla
   sonlandırılmaz ve her karar kayda yazılır. **Varsayılan olarak kapalıdır.**
@@ -301,8 +325,9 @@ garantisi verilmez; 64 MiB sınırı yalnızca yerel sorgu tamponu içindir.
 ```powershell
 go test ./...
 go vet ./...
-go build -trimpath -ldflags "-X main.version=v1.3-dev" -o cookieguard.exe ./cmd/cookieguard
+go build -trimpath -ldflags "-X main.version=v1.3.0" -o cookieguard.exe ./cmd/cookieguard
 .\cookieguard.exe version
+.\cookieguard.exe gui          # pencereyi açar
 .\cookieguard.exe run --lang tr --notify --log "$env:LOCALAPPDATA\CookieGuard\events.jsonl"
 .\cookieguard.exe scan --lang tr
 ```
@@ -323,6 +348,17 @@ Kayıtlar çerez içeriği değil; EXE/dosya yolu (kullanıcı adı içerebilir)
 başlangıç zamanı, erişim hakları ve olay bilgisi içerir. Çerezler okunmaz,
 çözülmez veya ağa gönderilmez; telemetri yoktur. Kayıtlar otomatik döndürülmez;
 disk kullanımını takip edin. Kayıtlar kurcalamaya dayanıklı değildir.
+
+### Pencere (GUI)
+
+`cookieguard.exe` veya `cookieguard-tray.exe` dosyasını argümansız çift tıklamak
+yerel bir pencere açar; terminalden `cookieguard.exe gui` de aynısını yapar.
+Pencere şunları gösterir: gözlenen dosya sayısı ve erişilemeyen/çözülemeyen
+kapsam boşlukları; zaman, seviye, PID, EXE, dosya ve sinyalleri içeren canlı
+olay listesi; **Koruma: kapali/ac** (çalışırken engellemeyi aç/kapa), **Kaydi Ac**,
+**Temizle**, **Cikis** düğmeleri. Pencere izlenen kapsamı değiştirmez; engelleme
+siz açana (`--protect`/`--protect-review` veya düğme) kadar kapalıdır. Yanlış
+pozitif meşru bir aracı kapatabilir.
 
 ### Tepsi simgesi, engelleme ve imzalama
 

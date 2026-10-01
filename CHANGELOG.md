@@ -1,9 +1,11 @@
 # Changelog / Değişiklikler
 
-## v1.3-dev (unreleased / yayımlanmadı)
+## v1.3.0 (2026-10-01)
 
 ### English
-- Added `internal/threat`: a documented signal catalog and `Assess` classifier.
+- Added a native GUI window (`gui` command / default on double-click) showing
+  live events, scan coverage, and a runtime enforcement toggle.
+- Published a versioned GitHub release with built executables and SHA-256 sums.
 - Added `cookieguard threats` to print the family/technique catalog and sources.
 - Signals now explain observations: `untrusted_cookie_access`, `unsigned_binary`,
   `user_writable_binary`, `remote_debugging_switch` (high), `profile_argument`,
@@ -23,6 +25,9 @@
 - Added threat-package and enforcement tests; all Windows tests and `go vet` pass.
 
 ### Türkçe
+- Yerel GUI penceresi eklendi (`gui` komutu / çift tıklamada varsayılan): canlı
+  olaylar, tarama kapsamı ve çalışırken engelleme aç/kapa.
+- Derlenmiş exe'ler ve SHA-256 özetleriyle sürümlü GitHub release yayımlandı.
 - `internal/threat` eklendi: belgelenmiş sinyal kataloğu ve `Assess` sınıflandırıcı.
 - `cookieguard threats` komutu aile/teknik kataloğunu ve kaynakları JSON verir.
 - Sinyaller gözlemi açıklar: `untrusted_cookie_access`, `unsigned_binary`,
