@@ -12,10 +12,14 @@ import (
 )
 
 type ProcessInfo struct {
-	PID       int    `json:"pid"`
-	Name      string `json:"name"`
-	Path      string `json:"path"`
-	StartTime int64  `json:"start_time"`
+	PID         int    `json:"pid"`
+	Name        string `json:"name"`
+	Path        string `json:"path"`
+	StartTime   int64  `json:"start_time"`
+	CommandLine string `json:"command_line,omitempty"`
+	ParentPID   int    `json:"parent_pid,omitempty"`
+	ParentName  string `json:"parent_name,omitempty"`
+	ParentPath  string `json:"parent_path,omitempty"`
 }
 
 // BrowserLocation requires an exact executable name and installation layout.

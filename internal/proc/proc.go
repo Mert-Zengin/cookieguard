@@ -103,6 +103,25 @@ func StartTime(pid uint32) (int64, error) {
 	return c.Nanoseconds(), nil
 }
 
+// ParentPID returns the creator PID using PROCESS_BASIC_INFORMATION. When the
+// parent has exited, Windows may still report a reused or stale PID; callers
+// must corroborate it with the parent's creation time before trusting it.
+func ParentPID(pid uint32) (uint32, error) {
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	if err != nil {
+		return 0, err
+	}
+	defer windows.CloseHandle(h)
+
+	var pbi windows.PROCESS_BASIC_INFORMATION
+	var size uint32
+	if err := windows.NtQueryInformationProcess(h, windows.ProcessBasicInformation,
+		unsafe.Pointer(&pbi), uint32(unsafe.Sizeof(pbi)), &size); err != nil {
+		return 0, err
+	}
+	return uint32(pbi.InheritedFromUniqueProcessId), nil
+}
+
 // Kill terminates a process.
 func Kill(pid uint32) error {
 	h, err := windows.OpenProcess(windows.PROCESS_TERMINATE, false, pid)

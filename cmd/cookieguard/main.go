@@ -10,12 +10,14 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/cookieguard/internal/browser"
 	"github.com/cookieguard/internal/handle"
 	"github.com/cookieguard/internal/notify"
 	"github.com/cookieguard/internal/proc"
+	"github.com/cookieguard/internal/threat"
 	"github.com/cookieguard/internal/watcher"
 	"golang.org/x/sys/windows/registry"
 )
@@ -78,9 +80,14 @@ func run(args []string, out, diagnostics io.Writer) error {
 		}
 		fmt.Fprintln(out, message("Oturum açılışı kaydı kaldırıldı.", "Login startup entry removed."))
 		return nil
+	case "threats":
+		return json.NewEncoder(out).Encode(struct {
+			Families  []threat.Family `json:"families"`
+			Technique []string        `json:"technique_sources"`
+		}{threat.Catalog(), threat.TechniqueSources})
 	case "run", "scan":
 	default:
-		return fmt.Errorf("unknown command %q (run, scan, version, install, uninstall)", command)
+		return fmt.Errorf("unknown command %q (run, scan, version, install, uninstall, threats)", command)
 	}
 	if command == "run" && *interval < 100*time.Millisecond {
 		return errors.New("scan interval must be at least 100ms")
@@ -107,14 +114,14 @@ func run(args []string, out, diagnostics io.Writer) error {
 			}
 			return []string{p}, nil
 		}
-		return browser.FindCookiePaths(*profile)
+		return browser.FindSensitivePaths(*profile)
 	}
 	paths, err := discover()
 	if err != nil {
 		return err
 	}
 	if len(paths) == 0 {
-		return errors.New(message("Çerez dosyası bulunamadı. --profile veya test için --file kullanın.", "No cookie files found. Use --profile or --file for a test."))
+		return errors.New(message("Tarayıcı çerez/kimlik dosyası bulunamadı. --profile veya test için --file kullanın.", "No browser cookie/credential files found. Use --profile or --file for a test."))
 	}
 	fmt.Fprintln(diagnostics, message("Gözlem modu: hırsızlığı kesin olarak engellemez; kısa erişimleri kaçırabilir.", "Observation mode: does not guarantee prevention; may miss short-lived access."))
 	if !proc.IsElevated() {
@@ -163,7 +170,7 @@ func run(args []string, out, diagnostics io.Writer) error {
 				}
 			}
 			if alerts != nil && e.Kind == "review_access" {
-				alerts.Show("CookieGuard", fmt.Sprintf("%s\nPID=%d\nEXE=%s\nFILE=%s", message("İncelenmesi gereken dosya erişimi. Saldırı kanıtı değildir.", "File access to review. This is not proof of an attack."), e.Process.PID, e.Process.Path, e.File))
+				alerts.Show("CookieGuard", fmt.Sprintf("%s\n%s\nPID=%d\nEXE=%s\nFILE=%s", message("İncelenmesi gereken dosya erişimi. Saldırı kanıtı değildir.", "File access to review. This is not proof of an attack."), signalSummary(e), e.Process.PID, e.Process.Path, e.File))
 			}
 			if *jsonOutput {
 				return json.NewEncoder(out).Encode(e)
@@ -172,7 +179,10 @@ func run(args []string, out, diagnostics io.Writer) error {
 			if e.Kind == "browser_access" {
 				label = message("Beklenen tarayıcı erişimi", "Expected browser access")
 			}
-			_, err := fmt.Fprintf(out, "[%s] %s PID=%d EXE=%q FILE=%q\n", e.Time.Format(time.RFC3339), label, e.Process.PID, e.Process.Path, e.File)
+			if e.Level == "high" {
+				label = message("YÜKSEK ÖNCELİK: belgelenmiş bir hırsızlık tekniğiyle uyumlu", "HIGH: matches a documented theft technique")
+			}
+			_, err := fmt.Fprintf(out, "[%s] %s PID=%d EXE=%q FILE=%q SIGNALS=%s\n", e.Time.Format(time.RFC3339), label, e.Process.PID, e.Process.Path, e.File, signalSummary(e))
 			return err
 		},
 	}
@@ -180,6 +190,17 @@ func run(args []string, out, diagnostics io.Writer) error {
 }
 
 const startupKey = `Software\Microsoft\Windows\CurrentVersion\Run`
+
+func signalSummary(e watcher.Event) string {
+	if len(e.Signals) == 0 {
+		return "-"
+	}
+	parts := make([]string, 0, len(e.Signals))
+	for _, s := range e.Signals {
+		parts = append(parts, s.ID+":"+string(s.Severity))
+	}
+	return strings.Join(parts, ",")
+}
 
 func install(lang string) error {
 	exe, err := os.Executable()

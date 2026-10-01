@@ -24,11 +24,18 @@ func TestDiscoverProfilesAndSidecars(t *testing.T) {
 	fixtures := []string{
 		`AppData\Local\Google\Chrome\User Data\Profile 12\Network\Cookies`,
 		`AppData\Local\Google\Chrome\User Data\Profile 12\Network\Cookies-wal`,
+		`AppData\Local\Google\Chrome\User Data\Local State`,
+		`AppData\Local\Google\Chrome\User Data\Default\Login Data`,
 		`AppData\Local\Microsoft\Edge\User Data\Default\Cookies`,
+		`AppData\Local\Microsoft\Edge\User Data\Local State`,
 		`AppData\Roaming\Mozilla\Firefox\Profiles\abc.default-release\cookies.sqlite`,
 		`AppData\Roaming\Mozilla\Firefox\Profiles\other.profile\cookies.sqlite-shm`,
+		`AppData\Roaming\Mozilla\Firefox\Profiles\abc.default-release\key4.db`,
+		`AppData\Roaming\Mozilla\Firefox\Profiles\abc.default-release\logins.json`,
 	}
-	for _, rel := range append(append([]string{}, fixtures...), `AppData\Local\Google\Chrome\User Data\Default\Network\Cookies.backup`) {
+	for _, rel := range append(append([]string{}, fixtures...),
+		`AppData\Local\Google\Chrome\User Data\Default\Network\Cookies.backup`,
+		`AppData\Local\Google\Chrome\User Data\Default\History`) {
 		p := filepath.Join(root, rel)
 		if err := os.MkdirAll(filepath.Dir(p), 0700); err != nil {
 			t.Fatal(err)
@@ -37,7 +44,7 @@ func TestDiscoverProfilesAndSidecars(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	paths, err := FindCookiePaths(root)
+	paths, err := FindSensitivePaths(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +60,7 @@ func TestDiscoverProfilesAndSidecars(t *testing.T) {
 			t.Errorf("missing %s", rel)
 		}
 	}
-	paths, err = FindCookiePaths(t.TempDir())
+	paths, err = FindSensitivePaths(t.TempDir())
 	if err != nil || len(paths) != 0 {
 		t.Fatalf("empty profile: %v %v", paths, err)
 	}

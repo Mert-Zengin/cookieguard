@@ -6,15 +6,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/cookieguard/internal/handle"
-	"github.com/cookieguard/internal/risk"
+	"github.com/cookieguard/internal/threat"
 )
 
 type Event struct {
-	Time time.Time `json:"time"`
-	Kind string    `json:"kind"`
+	Time     time.Time       `json:"time"`
+	Kind     string          `json:"kind"`
+	Level    string          `json:"level"`
+	Signals  []threat.Signal `json:"signals,omitempty"`
+	Families []string        `json:"associated_families,omitempty"`
 	handle.Observation
 }
 
@@ -28,7 +32,11 @@ type Watcher struct {
 }
 
 func eventKey(e Event) string {
-	return fmt.Sprintf("%d:%d:%s:%s:%s", e.Process.PID, e.Process.StartTime, e.Process.Path, e.File, e.Kind)
+	ids := make([]string, 0, len(e.Signals))
+	for _, s := range e.Signals {
+		ids = append(ids, s.ID)
+	}
+	return fmt.Sprintf("%d:%d:%s:%s:%s:%s:%s", e.Process.PID, e.Process.StartTime, e.Process.Path, e.File, e.Kind, e.Level, strings.Join(ids, ","))
 }
 
 // Run stops on cancellation and rediscovers files on every scan.
@@ -61,21 +69,26 @@ func (w *Watcher) Run(ctx context.Context) error {
 			w.Status(report)
 		}
 		current := make(map[string]bool)
-		allowed, checked := make(map[int]bool), make(map[int]bool)
+		assessed := make(map[int]threat.Assessment)
 		for _, observation := range report.Observations {
 			p := observation.Process
-			if !checked[p.PID] {
-				allowed[p.PID] = risk.IsAllowed(p)
-				checked[p.PID] = true
+			assessment, ok := assessed[p.PID]
+			if !ok {
+				assessment = threat.Assess(p)
+				assessed[p.PID] = assessment
 			}
 			kind := "review_access"
-			if allowed[p.PID] {
+			if assessment.Level == "expected" {
 				kind = "browser_access"
 				if !w.IncludeBrowsers {
 					continue
 				}
 			}
-			event := Event{Time: time.Now().UTC(), Kind: kind, Observation: observation}
+			event := Event{
+				Time: time.Now().UTC(), Kind: kind, Level: assessment.Level,
+				Signals: assessment.Signals, Families: assessment.Families,
+				Observation: observation,
+			}
 			key := eventKey(event)
 			if current[key] {
 				continue

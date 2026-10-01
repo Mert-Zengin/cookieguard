@@ -19,6 +19,13 @@ has been validated for this build. License: [MIT](LICENSE).
 - Exact browser executable names, expected installation layouts, and embedded
   Authenticode verification before labeling access as expected browser access.
   Name substrings and `system32` locations do not grant trust.
+- Browser-data scope beyond cookies: `Local State` (Chromium encryption key
+  material), `Login Data`, `Web Data`, and Firefox `key4.db`/`logins.json`.
+- Behavior signals derived from public infostealer reporting: untrusted-binary
+  access, unsigned binaries, user-writable/temporary locations, Chromium
+  remote-debugging switches, browser-profile arguments, and unexpected browser
+  parents. Signals explain *why* an access is interesting; they do not name a
+  malware family.
 - Review alerts, optional Windows dialogs, optional local JSON Lines logs.
   Repeated observations are deduplicated while continuously visible.
 - Explicit coverage-gap counters and English/Turkish operational messages.
@@ -32,8 +39,9 @@ has been validated for this build. License: [MIT](LICENSE).
 | Prove file contents were read or stolen | Not supported |
 | Intercept or deny a read before it happens | Not supported |
 | Reliably catch short-lived reads between scans | Not supported |
-| Detect browser injection, memory scraping, or remote-debugging abuse | Not implemented |
-| Identify/block Lumma, RedLine, Rakhni, VoidStealer, or Epsilon | Not validated |
+| Detect a browser started with remote-debugging switches | Signal implemented (`remote_debugging_switch`, high) |
+| Detect browser injection or in-memory scraping | Not implemented |
+| Attribute an access to Lumma, RedLine, Vidar, Raccoon, Agent Tesla, Rhadamanthys, Gremlin, DarkCloud, VoidStealer, Epsilon, or Rakhni | Not supported; only shared technique context |
 | Zero false positives, <1% CPU, <5 MiB RAM | Not guaranteed; measure on your machine |
 
 An observation is **not proof of malware**. Antivirus, backup, migration, and
@@ -59,12 +67,41 @@ The system handle buffer is reused and capped at 64 MiB; parsing and Go runtime
 memory are additional. CPU and memory depend on system handle counts. Smaller
 intervals increase work and still cannot guarantee prevention.
 
+## Threat signals and sources
+
+Signals are severity-ranked and explainable. `high` means the observation matches
+a specifically documented theft technique (currently Chromium remote-debugging
+switches). `review` means the access deserves a look but has legitimate
+explanations. `expected` means a signed binary in a known browser layout.
+
+| Signal | Meaning | Public technique reference |
+|---|---|---|
+| `untrusted_cookie_access` | Non-browser binary holds a readable handle | [T1555.003](https://attack.mitre.org/techniques/T1555/003/) |
+| `unsigned_binary` | No verifiable embedded signature (offline) | Family sourcing below |
+| `user_writable_binary` | Runs from Temp/Downloads/ProgramData | Family sourcing below |
+| `remote_debugging_switch` | `--remote-debugging-*` on the command line | [Elastic](https://www.elastic.co/guide/en/security/8.19/potential-cookies-theft-via-browser-debugging.html), [Red Canary](https://redcanary.com/blog/threat-intelligence/google-chrome-app-bound-encryption/) |
+| `profile_argument` | Command line points at a browser profile | ABE-bypass research below |
+| `browser_launched_by_untrusted_parent` | Browser started by a non-session/browser parent | Family sourcing below |
+
+Documented families used for context only (never attribution):
+Lumma ([Microsoft](https://www.microsoft.com/en-us/security/blog/2025/05/21/lumma-stealer-breaking-down-the-delivery-techniques-and-capabilities-of-a-prolific-infostealer/)),
+RedLine ([Microsoft WDSI](https://www.microsoft.com/en-us/wdsi/threats/malware-encyclopedia-description?Name=Trojan:Win32/RedLineStealer!rfn&ThreatID=2147817010)),
+Vidar ([Unit 42](https://unit42.paloaltonetworks.com/vidar-stealer-xmrig-miner-campaign-analysis/)),
+Raccoon ([MITRE S1148](https://attack.mitre.org/software/S1148/)),
+Agent Tesla ([Fortinet](https://www.fortinet.com/blog/threat-research/unmasking-agent-tesla-deep-dive-into-multi-stage-campaign)),
+Rhadamanthys ([Check Point](https://blog.checkpoint.com/research/rhadamanthys-0-9-2-a-stealer-that-keeps-evolving/)),
+Gremlin ([Unit 42](https://unit42.paloaltonetworks.com/gremlin-stealer-evolution/)),
+DarkCloud ([Unit 42](https://unit42.paloaltonetworks.com/darkcloud-stealer-and-obfuscated-autoit-scripting/)),
+VoidStealer ([Gen Digital](https://www.gendigital.com/blog/insights/research/voidstealer-abe-bypass)),
+Epsilon ([Malpedia](https://malpedia.caad.fkie.fraunhofer.de/details/win.epsilon_stealer)).
+Run `cookieguard threats` for the machine-readable catalog.
+
 ## Build and use (Windows, Go 1.26.0+)
 
 ```powershell
 go test ./...
 go vet ./...
-go build -trimpath -ldflags "-X main.version=v1.2-dev" -o cookieguard.exe ./cmd/cookieguard
+go build -trimpath -ldflags "-X main.version=v1.3-dev" -o cookieguard.exe ./cmd/cookieguard
 .\cookieguard.exe version
 .\cookieguard.exe run --lang en
 ```
@@ -74,6 +111,7 @@ go build -trimpath -ldflags "-X main.version=v1.2-dev" -o cookieguard.exe ./cmd/
 | `run` (or no command) | Observe the current user's discovered cookie files |
 | `scan` | Single scan; report and coverage counters as JSON on stdout |
 | `version` | Print embedded build version |
+| `threats` | Print the documented family/technique catalog and sources as JSON |
 | `install` / `uninstall` | Add/remove this EXE's current-user login startup entry |
 | `--lang tr` / `--lang en` | Operational message language (default: Turkish) |
 | `--interval 5s` | Delay between scans (default: 5s, minimum: 100ms) |
@@ -157,6 +195,12 @@ pozitif ürettiği iddia edilmez.
 - İnceleme uyarısı, isteğe bağlı Windows iletişim kutusu ve yerel JSON kaydı.
 - PID ve başlangıç zamanı dikkate alınarak tekrar eden gözlemler azaltılır.
 - Erişilemeyen işlemler/handle'lar/dosyalar ayrıca raporlanır.
+- Çerezlerin yanında `Local State`, `Login Data`, `Web Data` ve Firefox
+  `key4.db`/`logins.json` gibi hırsızların hedeflediği dosyalar da izlenir.
+- Kamuya açık raporlardan türetilen davranış sinyalleri: imzasız/güvenilmez
+  ikili erişimi, kullanıcı-yazılabilir konum, uzaktan hata ayıklama anahtarı,
+  profil argümanı ve beklenmeyen tarayıcı ebeveyni. Sinyaller nedeni açıklar;
+  belirli bir zararlı ailesini iddia etmez.
 - Türkçe/İngilizce çalışma mesajları ve isteğe bağlı oturum açılışı kaydı.
 
 ### Sınırlar
@@ -167,8 +211,12 @@ da erişebilir. Sistem otomatik işlem sonlandırmaz, çerez izinlerini veya gü
 politikalarını değiştirmez. **Erişim gerçekleşmeden önce engelleme yapmaz.**
 
 Taramalar arasındaki kısa erişimleri kaçırabilir. Bellek taraması, tarayıcı
-enjeksiyonu ve uzaktan hata ayıklama tespiti henüz uygulanmadı. Lumma, RedLine,
-Rakhni, VoidStealer veya Epsilon için doğrulanmış engelleme testi yoktur.
+enjeksiyonu ve süreç içi bellek kazıma henüz uygulanmadı. Uzaktan hata ayıklama
+anahtarı tespiti **sinyal** olarak vardır (`remote_debugging_switch`, yüksek).
+Lumma, RedLine, Vidar, Raccoon, Agent Tesla, Rhadamanthys, Gremlin, DarkCloud,
+VoidStealer, Epsilon veya Rakhni için **aile atfı veya doğrulanmış engelleme
+yoktur**; yalnızca paylaşılan teknik bağlamı raporlanır. `cookieguard threats`
+komutu kataloğu JSON olarak verir.
 
 Beklenen tarayıcı erişimi varsayılan olarak gizlenir; `--include-browsers` ile
 görülebilir. Geçerli imza ve beklenen konum, çalışan kodun güvenli olduğunu veya
@@ -189,7 +237,7 @@ garantisi verilmez; 64 MiB sınırı yalnızca yerel sorgu tamponu içindir.
 ```powershell
 go test ./...
 go vet ./...
-go build -trimpath -ldflags "-X main.version=v1.2-dev" -o cookieguard.exe ./cmd/cookieguard
+go build -trimpath -ldflags "-X main.version=v1.3-dev" -o cookieguard.exe ./cmd/cookieguard
 .\cookieguard.exe version
 .\cookieguard.exe run --lang tr --notify --log "$env:LOCALAPPDATA\CookieGuard\events.jsonl"
 .\cookieguard.exe scan --lang tr

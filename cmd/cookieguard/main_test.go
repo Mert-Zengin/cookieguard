@@ -27,9 +27,9 @@ func TestCLI(t *testing.T) {
 	for _, lang := range []string{"tr", "en"} {
 		var out, diag bytes.Buffer
 		err := run([]string{"scan", "--profile", t.TempDir(), "--lang", lang}, &out, &diag)
-		want := "No cookie files"
+		want := "No browser cookie"
 		if lang == "tr" {
-			want = "Çerez dosyası"
+			want = "Tarayıcı çerez"
 		}
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("wrong localized error: %v", err)

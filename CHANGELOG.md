@@ -1,5 +1,35 @@
 # Changelog / Değişiklikler
 
+## v1.3-dev (unreleased / yayımlanmadı)
+
+### English
+- Added `internal/threat`: a documented signal catalog and `Assess` classifier.
+- Added `cookieguard threats` to print the family/technique catalog and sources.
+- Signals now explain observations: `untrusted_cookie_access`, `unsigned_binary`,
+  `user_writable_binary`, `remote_debugging_switch` (high), `profile_argument`,
+  and `browser_launched_by_untrusted_parent`.
+- Family names (Lumma, RedLine, Vidar, Raccoon, Agent Tesla, Rhadamanthys,
+  Gremlin, DarkCloud, VoidStealer, Epsilon, Rakhni) are context from public
+  reporting only; the tool never attributes an access to a family.
+- Expanded monitored browser data to `Local State`, `Login Data`, `Web Data`,
+  and Firefox `key4.db`/`logins.json`, in addition to cookies and sidecars.
+- Enriched process context with command line and parent process name/path.
+- Added threat-package tests; all Windows tests and `go vet` pass.
+
+### Türkçe
+- `internal/threat` eklendi: belgelenmiş sinyal kataloğu ve `Assess` sınıflandırıcı.
+- `cookieguard threats` komutu aile/teknik kataloğunu ve kaynakları JSON verir.
+- Sinyaller gözlemi açıklar: `untrusted_cookie_access`, `unsigned_binary`,
+  `user_writable_binary`, `remote_debugging_switch` (yüksek), `profile_argument`
+  ve `browser_launched_by_untrusted_parent`.
+- Aile adları (Lumma, RedLine, Vidar, Raccoon, Agent Tesla, Rhadamanthys,
+  Gremlin, DarkCloud, VoidStealer, Epsilon, Rakhni) yalnızca kamuya açık
+  raporlardan bağlamdır; araç hiçbir zaman aile atfı yapmaz.
+- İzlenen tarayıcı verisi `Local State`, `Login Data`, `Web Data` ve Firefox
+  `key4.db`/`logins.json` ile genişletildi; çerezler ve yan dosyalar korunur.
+- Süreç bağlamı komut satırı ve ebeveyn süreç adı/yolu ile zenginleştirildi.
+- Tehdit paketi testleri eklendi; tüm Windows testleri ve `go vet` geçer.
+
 ## v1.2-dev (unreleased / yayımlanmadı)
 
 ### English

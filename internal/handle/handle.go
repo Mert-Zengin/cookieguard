@@ -10,6 +10,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/cookieguard/internal/proc"
 	"github.com/cookieguard/internal/risk"
 	"golang.org/x/sys/windows"
 )
@@ -240,9 +241,18 @@ func (s *Scanner) Scan(paths []string) (report Report, scanErr error) {
 		if windows.GetProcessTimes(ph, &c, &exit, &k, &u) == nil {
 			start = c.Nanoseconds()
 		}
+		// Process context is best-effort: a permission failure leaves the field
+		// empty rather than inventing a value.
+		commandLine, _ := proc.CommandLine(uint32(e.pid))
+		parentPID, _ := proc.ParentPID(uint32(e.pid))
+		parentPath, _ := proc.ImagePath(parentPID)
 		report.Observations = append(report.Observations, Observation{
-			Process: risk.ProcessInfo{PID: int(e.pid), Name: filepath.Base(imagePath), Path: imagePath, StartTime: start},
-			File:    path, Access: e.access,
+			Process: risk.ProcessInfo{
+				PID: int(e.pid), Name: filepath.Base(imagePath), Path: imagePath, StartTime: start,
+				CommandLine: commandLine, ParentPID: int(parentPID),
+				ParentName: filepath.Base(parentPath), ParentPath: parentPath,
+			},
+			File: path, Access: e.access,
 		})
 	}
 	return report, nil
