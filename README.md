@@ -245,6 +245,12 @@ discovery, unsigned lookalikes, deduplication, cancellation, and CLI output.
 Local live testing was on Windows 10 amd64 without elevation; other Windows
 versions and elevated coverage require additional validation.
 
+To validate against a **real** sample, follow
+[docs/SANDBOX_TESTING.md](docs/SANDBOX_TESTING.md): an isolated VM or Any.Run in
+interactive mode, with throwaway accounts, snapshots, and no corporate network.
+Use `go run ./tools/fakecookies` to create a synthetic profile when you do not
+want to log in anywhere.
+
 ## Keep sessions safer
 
 Keep Windows, browsers, Microsoft Defender/your endpoint protection, and
@@ -391,6 +397,11 @@ link eşleştirmesi, salt yazma ayrımı, hatalı tablo girdileri, sahte tarayı
 profil bulma, imzasız dosyalar, tekrar azaltma, iptal ve komut satırı davranışını
 kontrol eder. Gerçek çerez okunmaz, zararlı çalıştırılmaz, kullanıcı işlemi
 sonlandırılmaz. Race testi CGO ve uyumlu C derleyicisi gerektirir.
+
+**Gerçek** bir örnekle doğrulama için [docs/SANDBOX_TESTING.md](docs/SANDBOX_TESTING.md)
+belgesine bakın: izole VM veya etkileşimli Any.Run, geçici hesaplar, snapshot ve
+kurumsal ağ olmadan. Gerçek bir hesaba giriş yapmak istemiyorsanız
+`go run ./tools/fakecookies` ile sahte profil üretebilirsiniz.
 
 Windows, tarayıcı, Defender/uç nokta koruması ve SmartScreen'i güncel ve açık
 tutun. Bilinmeyen indirme/eklentilerden kaçının; günlük işlerde standart hesap
