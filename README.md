@@ -10,12 +10,14 @@ Cookie stealers (Lumma, Rakhni, RedLine, etc.) target browser cookies to hijack 
 
 ## 🔍 Threat Analysis (2026)
 
-| Stealer | Technique | Bypasses ABE? | Cookie Theft Method |
-|---------|-----------|---------------|---------------------|
-| **Lumma** | Chrome DevTools Protocol | ✅ Yes | Reads cookies via `Network.getAllCookies` in headless browser | 
-| **RedLine** | DPAPI decryption | ❌ No | Decrypts `Local State` + `Cookies` DB | 
-| **Rakhni** | Process injection | ❌ No | Injects into browser process to read memory | 
-| **VoidStealer** | Debugger attachment | ✅ Yes | Steals keys from RAM during decryption | 
+| Stealer | Technique | Bypasses ABE? | Cookie Theft Method | Detection Method |
+|---------|-----------|---------------|---------------------|------------------|
+| **Lumma** | Chrome DevTools Protocol | ✅ Yes | Reads cookies via `Network.getAllCookies` in headless browser | Monitors headless browser processes with active DevTools Protocol connections; blocks non-browser processes accessing chrome.exe |
+| **RedLine** | DPAPI decryption | ❌ No | Decrypts `Local State` + `Cookies` DB | Checks for processes accessing DPAPI-protected files with non-browser signatures; verifies process integrity via Windows API |
+| **Rakhni** | Process injection | ❌ No | Injects into browser process to read memory | Detects code injection via handle scanning; terminates suspicious injectors |
+| **VoidStealer** | Debugger attachment | ✅ Yes | Steals keys from RAM during decryption | Monitors debugger attachment to browser processes; blocks processes with debug privileges |
+| **Epsilon Stealer** | Electron-based infostealer | ✅ Yes | Harvests browser credentials via DevTools Protocol | Detects non-browser Electron processes accessing cookie files; blocks suspicious Electron apps |
+| **Epsilon Stealer** | Electron-based infostealer | ✅ Yes | Harvests browser credentials via DevTools Protocol | Detects non-browser Electron processes accessing cookie files; blocks suspicious Electron apps |
 
 > 🔒 **ABE (App-Bound Encryption)**: Modern browsers (Chrome 127+) use ABE to protect cookies. Stealers bypass it via: 1) Browser debugging, 2) Memory scanning, 3) DPAPI decryption.
 
@@ -76,6 +78,15 @@ Cookie stealers (Lumma, Rakhni, RedLine gibi) tarayıcı çerezlerini hırsızl�
 - İsteğe bağlı süreç sonlandırma (yönetici hakları ile)
 - Minimum kaynak kullanımı (CPU < 1%, bellek < 5MB)
 - Çerez hırsızlığına karşı %100 koruma
+
+### Tehdit Analizi (2026)
+
+| Çalıcı | Teknik | ABE'yi Atlatır mı? | Çerez Çalma Yöntemi | Tespit Yöntemi |
+|--------|--------|--------------------|---------------------|----------------|
+| **Lumma** | Chrome DevTools Protocol | ✅ Evet | Headless tarayıcıda `Network.getAllCookies` ile çerezleri okur | Aktif DevTools Protocol bağlantıları olan headless tarayıcı süreçlerini izler; chrome.exe'ye erişen tarayıcı olmayan süreçleri engeller |
+| **RedLine** | DPAPI şifre çözme | ❌ Hayır | `Local State` + `Cookies` veritabanını şifresini çözer | Tarayıcı olmayan imzalarla DPAPI korumalı dosyalara erişen süreçleri kontrol eder; süreç bütünlüğünü Windows API ile doğrular |
+| **Rakhni** | Süreç enjeksiyonu | ❌ Hayır | Tarayıcı sürecine enjekte olarak bellekten okuma yapar | Tarayıcı süreçlerine kod enjeksiyonunu izler; modül imzalarını doğrular |
+| **VoidStealer** | Bellek tarama | ✅ Evet | Tarayıcı bellek bölgelerini doğrudan okur | NtQuerySystemInformation ile bellek tarama girişimlerini tarar; yetkisiz bellek erişimini engeller |
 
 ### Kurulum
 
